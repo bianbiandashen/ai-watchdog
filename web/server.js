@@ -51,25 +51,40 @@ function getDaemonStatus() {
 
 // ── Process APIs ──────────────────────────────────────────────────────────────
 const MCP_PATTERNS = [
-  'server-qdrant\\.js', 'orba-context-mcp', 'orba-context@',
-  'orba-context/dist/mcp', 'figma.*mcp', 'mitmproxy.*mcp',
-  'playwright.*mcp', 'ChromeDevTools.*mcp', 'proxyman.*mcp',
-  'plugin_miniprogram', 'mp-cli.*mcp'
+  'server-qdrant\\.js',
+  'orba-context-mcp', 'orba-context@', 'orba-context/dist/mcp',
+  'mcpServer/index\\.js',          // orba MCP server wrapper
+  'chrome-devtools-mcp',           // Chrome DevTools MCP
+  'ide-cli-mcp',                   // MiniProgram IDE CLI MCP
+  'figma.*mcp|figma_agent',        // Figma MCP + Figma Agent
+  'mitmproxy.*mcp',
+  'playwright.*mcp',
+  'Proxyman.*mcp-server',          // Proxyman MCP server binary
+  'proxyman.*mcp',
+  'plugin_miniprogram',
+  'mp-cli.*mcp|@mp/ide-cli',
+  'run-benchmark\\.mjs',           // Spanner benchmark harness
+  'pageindex',                     // PageIndex MCP (if installed)
 ];
 const TOOL_PATTERNS = ['claude', 'codex', 'Cursor', 'Warp', 'OrbaDesktop', 'orba-cli', 'orba-desktop'];
 
 // Human-friendly names from command strings
 const MCP_NAME_RULES = [
-  { re: /server-qdrant/,            name: 'Qdrant Vector DB' },
-  { re: /orba-context-mcp/,         name: 'Orba Context Graph' },
-  { re: /orba-context@|orba-context\/dist\/mcp/, name: 'Orba Context MCP' },
-  { re: /figma.*mcp|OrbaFigmaToCode/,            name: 'Figma MCP' },
-  { re: /mitmproxy/,                name: 'mitmproxy MCP' },
-  { re: /playwright/,               name: 'Playwright MCP' },
-  { re: /ChromeDevTools/,           name: 'Chrome DevTools MCP' },
-  { re: /proxyman/,                 name: 'Proxyman MCP' },
-  { re: /plugin_miniprogram/,       name: 'MiniProgram IDE-CLI' },
-  { re: /mp-cli/,                   name: 'MP CLI MCP' },
+  { re: /server-qdrant/,                    name: 'Qdrant Vector DB' },
+  { re: /orba-context-mcp/,                 name: 'Orba Context Graph' },
+  { re: /orba-context@|orba-context\/dist/, name: 'Orba Context MCP' },
+  { re: /mcpServer\/index\.js/,             name: 'Orba MCP Server' },
+  { re: /chrome-devtools-mcp/,              name: 'Chrome DevTools MCP' },
+  { re: /ide-cli-mcp/,                      name: 'MiniProgram IDE-CLI MCP' },
+  { re: /figma_agent/,                      name: 'Figma Agent' },
+  { re: /figma.*mcp|OrbaFigmaToCode/,       name: 'Figma MCP' },
+  { re: /mitmproxy/,                        name: 'mitmproxy MCP' },
+  { re: /playwright/,                       name: 'Playwright MCP' },
+  { re: /Proxyman.*mcp-server|proxyman.*mcp/, name: 'Proxyman MCP' },
+  { re: /plugin_miniprogram/,               name: 'MiniProgram IDE-CLI' },
+  { re: /mp-cli|@mp\/ide-cli/,              name: 'MP CLI MCP' },
+  { re: /run-benchmark\.mjs/,               name: 'Spanner Benchmark' },
+  { re: /pageindex/,                        name: 'PageIndex MCP' },
 ];
 
 function getMCPToolName(cmd) {

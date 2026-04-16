@@ -203,7 +203,9 @@ tr:hover td { background: rgba(88,166,255,.04); }
 
   <!-- Project Brains -->
   <div class="section">
-    <div class="section-title">Project Brains <span style="font-weight:400;color:var(--dim)">(一键复制到新对话)</span></div>
+    <div class="section-title">Project Brains <span style="font-weight:400;color:var(--dim)">(一键复制到新对话)</span>
+      <button class="btn btn-copy" id="btn-refresh-brains" onclick="refreshBrains()" style="margin-left:auto">Refresh Brains</button>
+    </div>
     <div id="brains-container">Loading...</div>
   </div>
 
@@ -601,6 +603,18 @@ function renderKnowledge(d) {
       '</div>';
     }).join('');
   }
+}
+
+async function refreshBrains() {
+  const btn = $('btn-refresh-brains');
+  btn.textContent = 'Refreshing...'; btn.disabled = true;
+  const r = await api('/api/refresh-brains', { method: 'POST' });
+  btn.textContent = 'Refresh Brains'; btn.disabled = false;
+  if (r && r.ok) {
+    toast('Updated ' + r.updated + ' BRAIN.md files');
+    _knowledgeLoaded = false;
+    refreshAll();
+  } else toast(r ? r.error : 'Failed', false);
 }
 
 function copyText(btn) {

@@ -378,6 +378,100 @@ function getBestPractices() {
   } catch { return []; }
 }
 
+// Rebuild BRAIN.md for each project with user messages (high priority) + summaries
+function rebuildBrains() {
+  const projects = {};
+  // 1. Scan recent Claude sessions, extract USER messages grouped by project
+  try {
+    const projectDirs = fs.readdirSync(CLAUDE_PROJECTS, { withFileTypes: true })
+      .filter(d => d.isDirectory()).map(d => path.join(CLAUDE_PROJECTS, d.name));
+    for (const dir of projectDirs) {
+      const projectDir = path.basename(dir);
+      const cwd = '/' + projectDir.replace(/^-/, '').replace(/-/g, '/');
+      // Map cwd to billion-smart folder
+      let smartFolder = '_global';
+      if (cwd.includes('/devin')) smartFolder = 'devin';
+      else if (cwd.includes('/orba-desktop')) smartFolder = 'orba-desktop';
+      else if (cwd.includes('/orba-memorybank-cli')) smartFolder = 'orba-memorybank-cli';
+      else if (cwd.includes('/ai-watchdog')) smartFolder = 'ai-watchdog';
+      if (!projects[smartFolder]) projects[smartFolder] = { userMsgs: [], summaries: [] };
+
+      // Read latest session file
+      const files = fs.readdirSync(dir).filter(f => f.endsWith('.jsonl'));
+      const sorted = files.map(f => ({ f, mtime: fs.statSync(path.join(dir, f)).mtimeMs }))
+        .sort((a, b) => b.mtime - a.mtime).slice(0, 3);
+      for (const { f } of sorted) {
+        try {
+          const lines = fs.readFileSync(path.join(dir, f), 'utf8').split('\n').filter(Boolean).slice(-40);
+          for (const line of lines) {
+            try {
+              const d = JSON.parse(line);
+              if (d.type !== 'user') continue;
+              const msg = d.message || {};
+              let content = typeof msg === 'object' ? (msg.content || '') : String(msg);
+              if (Array.isArray(content)) {
+                const t = content.find(c => c && c.type === 'text');
+                content = t ? t.text : '';
+              }
+              if (content && typeof content === 'string') {
+                const text = content.trim().split('\n')[0].substring(0, 150);
+                if (text.length > 10) projects[smartFolder].userMsgs.push(text);
+              }
+            } catch {}
+          }
+        } catch {}
+      }
+    }
+  } catch {}
+
+  // 2. Collect existing summaries
+  try {
+    for (const proj of Object.keys(projects)) {
+      const sumDir = path.join(SMART_HOME, proj, 'summaries');
+      if (!fs.existsSync(sumDir)) continue;
+      const files = fs.readdirSync(sumDir).filter(f => f.endsWith('.md'))
+        .sort().reverse().slice(0, 3);
+      for (const f of files) {
+        try {
+          const content = fs.readFileSync(path.join(sumDir, f), 'utf8');
+          projects[proj].summaries.push(content.substring(0, 500));
+        } catch {}
+      }
+    }
+  } catch {}
+
+  // 3. Rebuild each BRAIN.md — user messages first (highest weight)
+  let updated = 0;
+  for (const [proj, data] of Object.entries(projects)) {
+    const brainFile = path.join(SMART_HOME, proj, 'BRAIN.md');
+    if (!fs.existsSync(brainFile)) continue;
+
+    // Read existing static content (everything before "## 我最近在关注")
+    let existing = fs.readFileSync(brainFile, 'utf8');
+    const cutMark = '## 我最近在关注';
+    const cutIdx = existing.indexOf(cutMark);
+    const staticPart = cutIdx >= 0 ? existing.substring(0, cutIdx).trimEnd() : existing.trimEnd();
+
+    // Build dynamic section
+    const userSection = data.userMsgs.length > 0
+      ? '## 我最近在关注\n> 权重最高 — 这些是我本人发的消息，代表我当前的关注点\n\n' +
+        [...new Set(data.userMsgs)].slice(0, 10).map(m => '- ' + m).join('\n')
+      : '';
+
+    const sumSection = data.summaries.length > 0
+      ? '\n\n## 近期会话总结\n> AI 生成的摘要，帮助延续上下文\n\n' +
+        data.summaries.join('\n---\n').substring(0, 1500)
+      : '';
+
+    const newContent = staticPart + '\n\n' + userSection + sumSection +
+      '\n\n---\n_Last updated: ' + new Date().toISOString().replace('T', ' ').substring(0, 19) + ' by ai-watchdog_\n';
+
+    fs.writeFileSync(brainFile, newContent);
+    updated++;
+  }
+  return { ok: true, updated };
+}
+
 function getBrains() {
   try {
     const projects = fs.readdirSync(SMART_HOME, { withFileTypes: true })
@@ -497,6 +591,15 @@ const server = http.createServer((req, res) => {
   // POST /api/clean-to-watermark
   if (method === 'POST' && pathname === '/api/clean-to-watermark') {
     const r = cleanToWatermark(60);
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(200);
+    res.end(JSON.stringify(r));
+    return;
+  }
+
+  // POST /api/refresh-brains
+  if (method === 'POST' && pathname === '/api/refresh-brains') {
+    const r = rebuildBrains();
     res.setHeader('Content-Type', 'application/json');
     res.writeHead(200);
     res.end(JSON.stringify(r));

@@ -477,6 +477,17 @@ function rebuildBrains() {
     }
     updated++;
   }
+
+  // Trigger PageIndex re-index in background (non-blocking)
+  const reindexScript = path.join(SMART_HOME, 'reindex.py');
+  const venvPython = path.join(SMART_HOME, '.venv', 'bin', 'python');
+  if (fs.existsSync(reindexScript) && fs.existsSync(venvPython)) {
+    exec(`${venvPython} ${reindexScript}`, { timeout: 60000 }, (err, stdout) => {
+      if (stdout) console.log('[PageIndex]', stdout.trim());
+      if (err) console.error('[PageIndex error]', err.message);
+    });
+  }
+
   return { ok: true, updated };
 }
 

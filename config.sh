@@ -80,4 +80,4 @@ RECOVERY_WINDOW_SEC=300
 
 # ─── Notifications ───────────────────────────────────────────────────────────
 NOTIFY_ENABLED=true
-VERBOSE=false
+VERBOSE=false    # set to true to see DEBUG lines in watchdog.log

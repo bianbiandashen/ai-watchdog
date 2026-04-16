@@ -64,11 +64,14 @@ is_orphan() {
 
 safe_kill() {
     local pid="$1" label="$2"
-    if is_protected "$pid"; then
-        log_debug "Skip protected PID $pid ($label)"
+    # Already gone
+    if ! kill -0 "$pid" 2>/dev/null; then
+        log_debug "PID $pid already gone ($label)"
         return 1
     fi
-    if ! kill -0 "$pid" 2>/dev/null; then
+    # Protected CLI tool
+    if is_protected "$pid"; then
+        log_debug "Skip protected PID $pid ($label)"
         return 1
     fi
     log_info "KILL PID $pid ($label)"

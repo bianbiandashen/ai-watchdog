@@ -4,13 +4,14 @@
 cleanup_orphans() {
     local killed=0 freed_mb=0
 
-    while IFS= read -r entry; do
+    while IFS=$'\n' read -r entry; do
         [[ -z "$entry" ]] && continue
         local pid label mem
-        read -r pid label mem <<< "$entry"
+        IFS=' ' read -r pid label mem <<< "$entry"
+        [[ -z "$pid" ]] && continue
         if safe_kill "$pid" "$label"; then
             killed=$(( killed + 1 ))
-            freed_mb=$(( freed_mb + mem ))
+            freed_mb=$(( freed_mb + ${mem:-0} ))
         fi
     done < <(find_orphan_mcp_procs)
 
@@ -24,10 +25,11 @@ cleanup_orphans() {
 cleanup_memory_hogs() {
     local killed=0 freed_mb=0
 
-    while IFS= read -r entry; do
+    while IFS=$'\n' read -r entry; do
         [[ -z "$entry" ]] && continue
         local pid label mem
-        read -r pid label mem <<< "$entry"
+        IFS=' ' read -r pid label mem <<< "$entry"
+        [[ -z "$pid" ]] && continue
         log_warn "Memory hog: PID=$pid ${mem}MB ($label)"
         if safe_kill "$pid" "hog:$label"; then
             killed=$(( killed + 1 ))

@@ -15,48 +15,24 @@ check_memory_pressure() {
 }
 
 # Emit lines: "pid label mem_mb" for each orphaned MCP server process
+# Only kills true orphans: PPID=1 (launchd) or dead parent
 find_orphan_mcp_procs() {
     for pattern in "${ORPHAN_TARGET_PATTERNS[@]}"; do
-        local pids=() orphan_pids=()
+        local total=0 orphan_count=0
         while IFS= read -r line; do
             [[ -z "$line" ]] && continue
             local pid; pid=$(awk '{print $2}' <<< "$line")
-            pids+=("$pid")
-            is_orphan "$pid" && orphan_pids+=("$pid") || true
-        done < <(ps aux | grep -E "$pattern" | grep -v grep)
-
-        local total=${#pids[@]}
-        local orphan_count=${#orphan_pids[@]}
-
-        (( total == 0 )) && continue
-
-        if (( orphan_count > 0 )); then
-            log_debug "Orphan MCP: pattern='$pattern' total=$total orphans=$orphan_count"
-            for pid in "${orphan_pids[@]+"${orphan_pids[@]}"}"; do
+            total=$(( total + 1 ))
+            if is_orphan "$pid"; then
+                orphan_count=$(( orphan_count + 1 ))
                 local mem; mem=$(get_process_mem_mb "$pid")
+                log_debug "True orphan: pattern='$pattern' PID=$pid PPID=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ') mem=${mem}MB"
                 echo "$pid $pattern $mem"
-            done
-        fi
+            fi
+        done < <(ps aux | grep -E "$pattern" | grep -v 'grep\|watchdog')
 
-        # Swarm: even if parents alive, if N >> threshold kill oldest
-        if (( total > ORPHAN_THRESHOLD )); then
-            local keep=$ORPHAN_THRESHOLD
-            local to_kill=$(( total - keep ))
-            local killed_extra=0
-            # Sort by start time ascending (oldest first) and kill extras
-            while IFS= read -r line; do
-                [[ -z "$line" ]] && continue
-                (( killed_extra >= to_kill )) && break
-                local pid; pid=$(awk '{print $2}' <<< "$line")
-                # Skip if already in orphan_pids list
-                local already=false
-                for op in "${orphan_pids[@]+"${orphan_pids[@]}"}"; do [[ "$op" == "$pid" ]] && already=true && break; done
-                [[ "$already" == "true" ]] && continue || true
-                local mem; mem=$(get_process_mem_mb "$pid")
-                echo "$pid $pattern $mem"
-                killed_extra=$(( killed_extra + 1 ))
-            done < <(ps aux | grep -E "$pattern" | grep -v grep | sort -k9,9)
-        fi
+        (( total > 0 && orphan_count > 0 )) && \
+            log_info "Pattern '$pattern': $total total, $orphan_count orphans to kill"
     done
 }
 

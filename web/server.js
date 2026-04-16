@@ -378,6 +378,19 @@ function getBestPractices() {
   } catch { return []; }
 }
 
+function getBrains() {
+  try {
+    const projects = fs.readdirSync(SMART_HOME, { withFileTypes: true })
+      .filter(d => d.isDirectory() && d.name !== '.git' && d.name !== 'best-practices');
+    return projects.map(d => {
+      const brainFile = path.join(SMART_HOME, d.name, 'BRAIN.md');
+      if (!fs.existsSync(brainFile)) return null;
+      const content = fs.readFileSync(brainFile, 'utf8');
+      return { project: d.name, content, size: content.length };
+    }).filter(Boolean);
+  } catch { return []; }
+}
+
 function getRecentSummaries(n = 10) {
   const results = [];
   try {
@@ -423,7 +436,8 @@ const ROUTES = {
   },
   'GET /api/knowledge': () => ({
     bestPractices: getBestPractices(),
-    summaries: getRecentSummaries(10)
+    summaries: getRecentSummaries(10),
+    brains: getBrains()
   }),
 };
 

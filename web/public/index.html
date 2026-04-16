@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Watchdog</title>
+<style>
+:root {
+  --bg: #0d1117; --bg2: #161b22; --bg3: #21262d;
+  --fg: #c9d1d9; --dim: #8b949e; --border: #30363d;
+  --blue: #58a6ff; --green: #3fb950; --red: #f85149;
+  --yellow: #d29922; --purple: #bc8cff;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-sans); font-size: 14px; line-height: 1.5; }
+a { color: var(--blue); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Layout */
+.container { max-width: 1200px; margin: 0 auto; padding: 0 16px; }
+.header { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 12px 0; position: sticky; top: 0; z-index: 10; }
+.header-inner { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.logo { font-family: var(--font-mono); font-size: 18px; font-weight: 700; color: var(--blue); display: flex; align-items: center; gap: 8px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.dot-on { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.dot-off { background: var(--red); box-shadow: 0 0 6px var(--red); }
+.stats { display: flex; gap: 16px; font-family: var(--font-mono); font-size: 12px; color: var(--dim); flex-wrap: wrap; }
+.stats .val { color: var(--fg); font-weight: 600; }
+.controls { display: flex; align-items: center; gap: 8px; }
+.controls label { font-size: 12px; color: var(--dim); cursor: pointer; }
+.toggle { appearance: none; width: 36px; height: 20px; border-radius: 10px; background: var(--bg3); border: 1px solid var(--border); cursor: pointer; position: relative; transition: background .2s; }
+.toggle:checked { background: var(--green); border-color: var(--green); }
+.toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform .2s; }
+.toggle:checked::after { transform: translateX(16px); }
+
+/* Sections */
+.section { margin: 20px 0; }
+.section-title { font-family: var(--font-mono); font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--dim); margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+
+/* Gauge */
+.gauge { margin-bottom: 12px; }
+.gauge-label { font-size: 12px; color: var(--dim); margin-bottom: 4px; display: flex; justify-content: space-between; }
+.gauge-track { height: 22px; background: var(--bg3); border-radius: 4px; overflow: hidden; }
+.gauge-fill { height: 100%; border-radius: 4px; transition: width .6s ease, background .3s; display: flex; align-items: center; justify-content: flex-end; padding-right: 8px; font-family: var(--font-mono); font-size: 11px; font-weight: 700; color: #fff; min-width: 40px; }
+
+/* Tables */
+table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 12px; }
+th { text-align: left; padding: 8px 10px; color: var(--dim); font-weight: 600; border-bottom: 1px solid var(--border); white-space: nowrap; }
+td { padding: 6px 10px; border-bottom: 1px solid var(--bg3); vertical-align: middle; }
+tr:hover td { background: rgba(88,166,255,.04); }
+.badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.badge-orphan { background: rgba(248,81,73,.15); color: var(--red); border: 1px solid rgba(248,81,73,.3); }
+.badge-ok { background: rgba(63,185,80,.15); color: var(--green); border: 1px solid rgba(63,185,80,.3); }
+.badge-protected { background: rgba(88,166,255,.1); color: var(--blue); border: 1px solid rgba(88,166,255,.2); }
+.cmd { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); }
+
+/* Buttons */
+.btn { font-family: var(--font-mono); font-size: 11px; padding: 3px 10px; border-radius: 4px; border: 1px solid; cursor: pointer; background: transparent; transition: .15s; }
+.btn:hover { filter: brightness(1.2); }
+.btn-kill { color: var(--red); border-color: rgba(248,81,73,.4); }
+.btn-kill:hover { background: rgba(248,81,73,.1); }
+.btn-kill-all { color: #fff; background: var(--red); border-color: var(--red); font-weight: 700; padding: 5px 14px; }
+.btn-copy { color: var(--blue); border-color: rgba(88,166,255,.3); }
+.btn-copy:hover { background: rgba(88,166,255,.1); }
+.btn-export { color: var(--purple); border-color: rgba(188,140,255,.3); }
+.btn-export:hover { background: rgba(188,140,255,.1); }
+
+/* Sessions */
+.session-group { margin-bottom: 16px; }
+.session-group h3 { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.session-group.claude h3 { color: var(--green); }
+.session-group.codex h3 { color: var(--yellow); }
+
+/* Log */
+.log-box { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; max-height: 320px; overflow-y: auto; font-family: var(--font-mono); font-size: 11px; line-height: 1.7; }
+.log-line { white-space: pre-wrap; word-break: break-all; }
+.log-error { color: var(--red); }
+.log-warn { color: var(--yellow); }
+.log-info { color: var(--green); }
+.log-debug { color: var(--dim); }
+
+/* Toast */
+.toast { position: fixed; bottom: 20px; right: 20px; padding: 10px 18px; border-radius: 6px; font-family: var(--font-mono); font-size: 12px; color: #fff; z-index: 100; opacity: 0; transition: opacity .3s; pointer-events: none; }
+.toast.show { opacity: 1; }
+.toast-ok { background: var(--green); }
+.toast-err { background: var(--red); }
+
+/* Footer */
+.footer { text-align: center; padding: 20px 0; font-size: 12px; color: var(--dim); border-top: 1px solid var(--border); margin-top: 24px; }
+
+/* Expandable tool groups */
+.tool-group { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
+.tool-header { display: flex; align-items: center; padding: 10px 16px; cursor: pointer; user-select: none; transition: background .15s; gap: 12px; }
+.tool-header:hover { background: var(--bg3); }
+.tool-header .arrow { color: var(--dim); font-size: 12px; transition: transform .2s; width: 16px; }
+.tool-header.open .arrow { transform: rotate(90deg); }
+.tool-header .tool-name { font-family: var(--font-mono); font-weight: 700; font-size: 14px; min-width: 140px; }
+.tool-header .tool-stat { font-family: var(--font-mono); font-size: 12px; color: var(--dim); }
+.tool-header .tool-stat .val { color: var(--fg); }
+.tool-children { display: none; border-top: 1px solid var(--border); }
+.tool-children.open { display: block; }
+.tool-children table { margin: 0; }
+.tool-children td { font-size: 11px; padding: 4px 10px; }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .header-inner { flex-direction: column; align-items: flex-start; }
+  .stats { flex-direction: column; gap: 4px; }
+  table { display: block; overflow-x: auto; }
+}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div class="container header-inner">
+    <div class="logo"><span class="dot" id="daemon-dot"></span> AI Watchdog</div>
+    <div class="stats" id="header-stats">
+      <span>Uptime: <span class="val" id="st-uptime">—</span></span>
+      <span>Cycles: <span class="val" id="st-cycles">—</span></span>
+      <span>Killed: <span class="val" id="st-killed">—</span></span>
+      <span>Freed: <span class="val" id="st-freed">—</span></span>
+    </div>
+    <div class="controls">
+      <label>Auto-refresh</label>
+      <input type="checkbox" class="toggle" id="auto-refresh" checked>
+      <span style="font-size:11px;color:var(--dim)" id="last-update"></span>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- Memory Gauge -->
+  <div class="section">
+    <div class="section-title">System Memory</div>
+    <div class="card">
+      <div class="gauge">
+        <div class="gauge-label">
+          <span id="mem-label">— MB used / — MB total</span>
+          <span id="mem-free">— MB free</span>
+        </div>
+        <div class="gauge-track" style="position:relative">
+          <div class="gauge-fill" id="mem-fill" style="width:0%"></div>
+          <div style="position:absolute;left:60%;top:0;bottom:0;width:2px;background:var(--green);opacity:.5" title="Target: 60%"></div>
+          <div style="position:absolute;left:80%;top:0;bottom:0;width:2px;background:var(--red);opacity:.5" title="Alert: 80%"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MCP Processes -->
+  <div class="section">
+    <div class="section-title">
+      MCP Server Processes
+      <button class="btn btn-kill-all" id="btn-clean" onclick="cleanToWatermark()" style="margin-left:auto">Clean to 60%</button>
+      <button class="btn btn-kill-all" onclick="killAllOrphans()" style="margin-left:8px">Kill All Orphans</button>
+    </div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <table>
+        <thead><tr><th>PID</th><th>MCP Tool</th><th>Owner</th><th>Port</th><th>RSS</th><th>Status</th><th></th></tr></thead>
+        <tbody id="mcp-table"><tr><td colspan="8" style="text-align:center;color:var(--dim);padding:20px">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Monitored Tools (expandable) -->
+  <div class="section">
+    <div class="section-title">Monitored Tools <span style="font-weight:400;color:var(--dim)">(click row to expand &amp; kill individual processes)</span></div>
+    <div id="tools-container">Loading...</div>
+  </div>
+
+  <!-- Sessions -->
+  <div class="section">
+    <div class="section-title">Recent Sessions (last 5)</div>
+    <div class="card">
+      <div class="session-group claude">
+        <h3>Claude</h3>
+        <table>
+          <thead><tr><th>Date</th><th>Directory</th><th>Summary</th><th>Size</th><th></th></tr></thead>
+          <tbody id="claude-sessions"><tr><td colspan="5" style="color:var(--dim)">Loading...</td></tr></tbody>
+        </table>
+      </div>
+      <div class="session-group codex">
+        <h3>Codex</h3>
+        <table>
+          <thead><tr><th>Date</th><th>Directory</th><th>Summary</th><th></th></tr></thead>
+          <tbody id="codex-sessions"><tr><td colspan="4" style="color:var(--dim)">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Logs -->
+  <div class="section">
+    <div class="section-title">Watchdog Log</div>
+    <div class="card" style="padding:8px">
+      <div class="log-box" id="log-box">Loading...</div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    ai-watchdog v1.0.0 &mdash; <a href="https://github.com/bianbiandashen/ai-watchdog" target="_blank">github.com/bianbiandashen/ai-watchdog</a>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+let timer = null;
+const INTERVAL = 5000;
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+async function api(path, opts) {
+  try {
+    const r = await fetch(path, opts);
+    return await r.json();
+  } catch (e) { return null; }
+}
+
+function $(id) { return document.getElementById(id); }
+
+function toast(msg, ok = true) {
+  const el = $('toast');
+  el.textContent = msg;
+  el.className = 'toast show ' + (ok ? 'toast-ok' : 'toast-err');
+  setTimeout(() => el.className = 'toast', 2500);
+}
+
+function relTime(ts) {
+  const sec = Math.floor(Date.now() / 1000 - ts);
+  if (sec < 60) return sec + 's ago';
+  if (sec < 3600) return Math.floor(sec / 60) + 'm ago';
+  if (sec < 86400) return Math.floor(sec / 3600) + 'h ago';
+  return Math.floor(sec / 86400) + 'd ago';
+}
+
+function fmtDate(ts) {
+  const d = new Date(ts * 1000);
+  return d.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit' }) + ' ' +
+         d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+function fmtUptime(sec) {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  return h + 'h ' + m + 'm ' + s + 's';
+}
+
+function fmtSize(bytes) {
+  if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
+  return Math.round(bytes / 1024) + ' KB';
+}
+
+function gaugeColor(pct) {
+  if (pct < 60) return 'var(--green)';
+  if (pct < 80) return 'var(--yellow)';
+  return 'var(--red)';
+}
+
+// ─── Renderers ────────────────────────────────────────────────────────────────
+function renderStatus(d) {
+  if (!d) return;
+  // Daemon dot
+  const dot = $('daemon-dot');
+  dot.className = 'dot ' + (d.daemon.running ? 'dot-on' : 'dot-off');
+
+  // Header stats
+  if (d.state && d.state.started) {
+    const upSec = Math.floor(Date.now() / 1000 - d.state.started);
+    $('st-uptime').textContent = fmtUptime(upSec);
+    $('st-cycles').textContent = d.state.cycle || 0;
+    $('st-killed').textContent = d.state.total_orphans_killed || 0;
+    $('st-freed').textContent = (d.state.total_mb_freed || 0) + ' MB';
+  }
+
+  // Memory gauge
+  const mem = d.mem;
+  $('mem-label').textContent = mem.usedMB + ' MB used / ' + mem.totalMB + ' MB total';
+  $('mem-free').textContent = mem.freeMB + ' MB free';
+  const fill = $('mem-fill');
+  fill.style.width = mem.pct + '%';
+  fill.style.background = gaugeColor(mem.pct);
+  fill.textContent = mem.pct + '%';
+
+  $('last-update').textContent = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+}
+
+function renderProcesses(d) {
+  if (!d) return;
+
+  // MCP table — show tool name, owner session, port, Kill button
+  const mcp = d.mcp || [];
+  const tbody = $('mcp-table');
+  if (mcp.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--dim);padding:20px">No MCP server processes running</td></tr>';
+  } else {
+    tbody.innerHTML = mcp.map(p => {
+      const status = p.orphan
+        ? '<span class="badge badge-orphan">orphan</span>'
+        : '<span class="badge badge-ok">active</span>';
+      const ports = (p.ports && p.ports.length)
+        ? p.ports.map(port => '<span class="badge" style="background:rgba(88,166,255,.12);color:var(--blue);border:1px solid rgba(88,166,255,.25);font-size:10px">:' + port + '</span>').join(' ')
+        : '<span style="color:var(--dim);font-size:11px">stdio</span>';
+      const owner = p.owner || {};
+      const ownerTag = owner.tool === 'orphan'
+        ? '<span style="color:var(--red)">parent dead</span>'
+        : owner.tool === '?'
+          ? '<span style="color:var(--dim)">unknown</span>'
+          : '<span style="color:var(--purple)">' + esc(owner.tool) + '</span>' +
+            (owner.hint ? ' <span style="color:var(--dim);font-size:10px">' + esc(owner.hint) + '</span>' : '');
+      return '<tr' + (p.orphan ? ' style="border-left:3px solid var(--red)"' : '') + '>' +
+        '<td>' + p.pid + '</td>' +
+        '<td style="font-weight:600">' + esc(p.toolName) + '</td>' +
+        '<td style="font-size:11px">' + ownerTag + '</td>' +
+        '<td>' + ports + '</td>' +
+        '<td>' + p.rss + ' MB</td>' +
+        '<td>' + status + '</td>' +
+        '<td><button class="btn btn-kill" onclick="killPid(' + p.pid + ',this)">Kill</button></td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  // Monitored tools — expandable groups with child processes
+  const tools = d.tools || [];
+  const container = $('tools-container');
+  if (tools.length === 0) {
+    container.innerHTML = '<div class="card" style="text-align:center;color:var(--dim);padding:20px">No monitored tools running</div>';
+  } else {
+    container.innerHTML = tools.map((t, i) => {
+      const kids = (t.children || []);
+      const rows = kids.map(c => {
+        const ports = (c.ports && c.ports.length)
+          ? c.ports.map(p => ':' + p).join(' ')
+          : 'stdio';
+        return '<tr>' +
+          '<td>' + c.pid + '</td>' +
+          '<td>' + c.rss + ' MB</td>' +
+          '<td>' + c.cpu + '%</td>' +
+          '<td style="font-size:10px;color:var(--dim)">' + esc(ports) + '</td>' +
+          '<td class="cmd" style="max-width:400px" title="' + esc(c.cmdShort || c.cmd) + '">' + esc(c.cmdShort || c.cmd) + '</td>' +
+          '<td><button class="btn btn-kill" onclick="killPid(' + c.pid + ',this)">Kill</button></td>' +
+          '</tr>';
+      }).join('');
+      return '<div class="tool-group">' +
+        '<div class="tool-header" onclick="toggleGroup(this)">' +
+          '<span class="arrow">&#9654;</span>' +
+          '<span class="tool-name">' + esc(t.name) + '</span>' +
+          '<span class="tool-stat"><span class="val">' + t.count + '</span> procs</span>' +
+          '<span class="tool-stat"><span class="val">' + t.totalRSS + '</span> MB</span>' +
+          '<span class="badge badge-protected" style="margin-left:auto">protected</span>' +
+        '</div>' +
+        '<div class="tool-children" id="tool-kids-' + i + '">' +
+          '<table><thead><tr><th>PID</th><th>RSS</th><th>CPU%</th><th>Port</th><th>Command</th><th></th></tr></thead>' +
+          '<tbody>' + rows + '</tbody></table>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  }
+}
+
+function renderSessions(d) {
+  if (!d) return;
+
+  // Claude
+  const ct = $('claude-sessions');
+  const cs = d.claude || [];
+  if (cs.length === 0) {
+    ct.innerHTML = '<tr><td colspan="5" style="color:var(--dim)">(no sessions)</td></tr>';
+  } else {
+    ct.innerHTML = cs.map(s =>
+      '<tr>' +
+      '<td style="white-space:nowrap">' + fmtDate(s.ts) + '</td>' +
+      '<td class="cmd" title="' + esc(s.cwd) + '">' + esc(s.cwd) + '</td>' +
+      '<td>' + esc(s.summary) + '</td>' +
+      '<td>' + fmtSize(s.size || 0) + '</td>' +
+      '<td style="white-space:nowrap">' +
+        '<button class="btn btn-copy" onclick="copyResume(\'claude\',\'' + esc(s.sessionId) + '\')">Resume</button> ' +
+        '<button class="btn btn-export" onclick="exportSession(\'claude\',\'' + esc(s.sessionId) + '\')">Export</button>' +
+      '</td></tr>'
+    ).join('');
+  }
+
+  // Codex
+  const dt = $('codex-sessions');
+  const ds = d.codex || [];
+  if (ds.length === 0) {
+    dt.innerHTML = '<tr><td colspan="4" style="color:var(--dim)">(no sessions)</td></tr>';
+  } else {
+    dt.innerHTML = ds.map(s =>
+      '<tr>' +
+      '<td style="white-space:nowrap">' + fmtDate(s.ts) + '</td>' +
+      '<td class="cmd" title="' + esc(s.cwd) + '">' + esc(s.cwd) + '</td>' +
+      '<td>' + esc(s.summary) + '</td>' +
+      '<td style="white-space:nowrap">' +
+        '<button class="btn btn-copy" onclick="copyResume(\'codex\',\'' + esc(s.sessionId) + '\')">Resume</button> ' +
+        '<button class="btn btn-export" onclick="exportSession(\'codex\',\'' + esc(s.sessionId) + '\')">Export</button>' +
+      '</td></tr>'
+    ).join('');
+  }
+}
+
+function renderLogs(d) {
+  if (!d || !d.lines) return;
+  const box = $('log-box');
+  box.innerHTML = d.lines.map(line => {
+    let cls = 'log-line';
+    if (line.includes('[ERROR]')) cls += ' log-error';
+    else if (line.includes('[WARN'))  cls += ' log-warn';
+    else if (line.includes('[INFO'))  cls += ' log-info';
+    else cls += ' log-debug';
+    return '<div class="' + cls + '">' + esc(line) + '</div>';
+  }).join('');
+  box.scrollTop = box.scrollHeight;
+}
+
+function esc(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ─── Actions ──────────────────────────────────────────────────────────────────
+async function killPid(pid, btn) {
+  if (!confirm('Kill PID ' + pid + '?')) return;
+  if (btn) { btn.textContent = '...'; btn.disabled = true; }
+  const r = await api('/api/kill/' + pid, { method: 'POST' });
+  if (r && r.ok) { toast('Killed PID ' + pid); }
+  else toast(r ? r.error : 'Failed', false);
+  setTimeout(refreshAll, 500);
+}
+
+async function killAllOrphans() {
+  if (!confirm('Kill ALL orphan MCP processes?')) return;
+  const btn = event.target; btn.textContent = 'Killing...'; btn.disabled = true;
+  const r = await api('/api/kill/0', { method: 'POST' });
+  btn.textContent = 'Kill All Orphans'; btn.disabled = false;
+  if (r && r.ok) { toast('Killed ' + r.killed + ' orphans'); }
+  else toast(r ? r.error : 'Failed', false);
+  setTimeout(refreshAll, 500);
+}
+
+async function cleanToWatermark() {
+  if (!confirm('Kill MCP processes (biggest first) until memory drops below 60%?')) return;
+  const btn = $('btn-clean'); btn.textContent = 'Cleaning...'; btn.disabled = true;
+  const r = await api('/api/clean-to-watermark', { method: 'POST' });
+  btn.textContent = 'Clean to 60%'; btn.disabled = false;
+  if (r && r.ok) {
+    toast('Killed ' + r.killed + ' procs, freed ~' + r.freedMB + 'MB. Memory now ' + r.memAfter + '%');
+  } else toast(r ? r.error : 'Failed', false);
+  setTimeout(refreshAll, 500);
+}
+
+async function copyResume(tool, sid) {
+  const cmd = tool === 'claude' ? 'claude --resume ' + sid : 'codex --session ' + sid;
+  try {
+    await navigator.clipboard.writeText(cmd);
+    toast('Copied: ' + cmd);
+  } catch { toast('Copy failed', false); }
+}
+
+async function exportSession(tool, sid) {
+  const r = await api('/api/export/' + tool + '/' + sid);
+  if (r && r.ok) {
+    toast('Exported to ' + r.path);
+    if (r.resumeCmd) alert('Resume command:\n\n' + r.resumeCmd + '\n\nExported to:\n' + r.path);
+  } else toast(r ? r.error : 'Export failed', false);
+}
+
+// ─── Expand/collapse tool groups ──────────────────────────────────────────────
+function toggleGroup(el) {
+  el.classList.toggle('open');
+  const kids = el.nextElementSibling;
+  kids.classList.toggle('open');
+}
+
+// ─── Refresh ──────────────────────────────────────────────────────────────────
+async function refreshAll() {
+  const [status, procs, sessions, logs] = await Promise.all([
+    api('/api/status'), api('/api/processes'), api('/api/sessions'), api('/api/logs')
+  ]);
+  renderStatus(status);
+  renderProcesses(procs);
+  renderSessions(sessions);
+  renderLogs(logs);
+}
+
+function startAutoRefresh() {
+  if (timer) clearInterval(timer);
+  timer = setInterval(refreshAll, INTERVAL);
+}
+
+function stopAutoRefresh() {
+  if (timer) { clearInterval(timer); timer = null; }
+}
+
+$('auto-refresh').addEventListener('change', function() {
+  this.checked ? startAutoRefresh() : stopAutoRefresh();
+});
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+refreshAll();
+startAutoRefresh();
+</script>
+</body>
+</html>

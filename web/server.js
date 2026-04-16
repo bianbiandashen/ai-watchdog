@@ -365,6 +365,38 @@ function cleanToWatermark(targetPct = 60) {
   return { ok: true, killed, freedMB, memBefore: after.pct + killed, memAfter: after.pct, targetPct };
 }
 
+// ── Knowledge APIs ───────────────────────────────────────────────────────────
+const SMART_HOME = path.join(os.homedir(), 'billion-smart');
+
+function getBestPractices() {
+  const dir = path.join(SMART_HOME, 'best-practices');
+  try {
+    return fs.readdirSync(dir).filter(f => f.endsWith('.md')).map(f => {
+      const content = fs.readFileSync(path.join(dir, f), 'utf8');
+      return { name: f.replace('.md', ''), content };
+    });
+  } catch { return []; }
+}
+
+function getRecentSummaries(n = 10) {
+  const results = [];
+  try {
+    const projects = fs.readdirSync(SMART_HOME, { withFileTypes: true })
+      .filter(d => d.isDirectory()).map(d => d.name);
+    for (const proj of projects) {
+      const sumDir = path.join(SMART_HOME, proj, 'summaries');
+      if (!fs.existsSync(sumDir)) continue;
+      const files = fs.readdirSync(sumDir).filter(f => f.endsWith('.md'));
+      for (const f of files) {
+        const fp = path.join(sumDir, f);
+        const stat = fs.statSync(fp);
+        results.push({ project: proj, file: f, ts: stat.mtimeMs / 1000, content: fs.readFileSync(fp, 'utf8') });
+      }
+    }
+  } catch {}
+  return results.sort((a, b) => b.ts - a.ts).slice(0, n);
+}
+
 // ── HTTP Server ───────────────────────────────────────────────────────────────
 const PUBLIC = path.join(__dirname, 'public');
 
@@ -389,6 +421,10 @@ const ROUTES = {
       return { lines };
     } catch { return { lines: [] }; }
   },
+  'GET /api/knowledge': () => ({
+    bestPractices: getBestPractices(),
+    summaries: getRecentSummaries(10)
+  }),
 };
 
 const server = http.createServer((req, res) => {

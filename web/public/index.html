@@ -195,6 +195,23 @@ tr:hover td { background: rgba(88,166,255,.04); }
     </div>
   </div>
 
+  <!-- Knowledge: Best Practices + Summaries -->
+  <div class="section">
+    <div class="section-title">Knowledge Hub <span style="font-weight:400;color:var(--dim)">(~/billion-smart)</span></div>
+    <div class="card">
+      <!-- Best Practices tabs -->
+      <div style="margin-bottom:16px">
+        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap" id="bp-tabs"></div>
+        <div id="bp-content" class="log-box" style="max-height:400px;white-space:pre-wrap;font-size:12px;line-height:1.6"></div>
+      </div>
+      <!-- Recent Summaries -->
+      <div>
+        <div style="font-weight:600;color:var(--yellow);margin-bottom:8px">Recent Session Summaries</div>
+        <div id="summaries-list" style="font-size:12px;color:var(--dim)">Loading...</div>
+      </div>
+    </div>
+  </div>
+
   <!-- Logs -->
   <div class="section">
     <div class="section-title">Watchdog Log</div>
@@ -482,14 +499,62 @@ function toggleGroup(el) {
 }
 
 // ─── Refresh ──────────────────────────────────────────────────────────────────
+// ─── Knowledge panel ──────────────────────────────────────────────────────────
+let _knowledgeLoaded = false;
+
+function renderKnowledge(d) {
+  if (!d) return;
+  const bp = d.bestPractices || [];
+  const tabs = $('bp-tabs');
+  const content = $('bp-content');
+
+  if (bp.length > 0 && !_knowledgeLoaded) {
+    _knowledgeLoaded = true;
+    tabs.innerHTML = bp.map((b, i) =>
+      '<button class="btn btn-copy' + (i === 0 ? '" style="background:rgba(88,166,255,.15)' : '') +
+      '" onclick="showBP(' + i + ',this)" data-idx="' + i + '">' + esc(b.name) + '</button>'
+    ).join('');
+    content.textContent = bp[0].content;
+    window._bpData = bp;
+  }
+
+  // Summaries
+  const sums = d.summaries || [];
+  const sl = $('summaries-list');
+  if (sums.length === 0) {
+    sl.innerHTML = '<span style="color:var(--dim)">(no summaries yet — will appear after 30 min of activity)</span>';
+  } else {
+    sl.innerHTML = sums.map(s => {
+      const date = new Date(s.ts * 1000).toLocaleString('en-US', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false });
+      return '<div class="tool-group" style="margin-bottom:6px">' +
+        '<div class="tool-header" onclick="toggleGroup(this)" style="padding:6px 12px">' +
+          '<span class="arrow">&#9654;</span>' +
+          '<span style="color:var(--purple);font-weight:600;min-width:120px">' + esc(s.project) + '</span>' +
+          '<span style="color:var(--dim)">' + date + '</span>' +
+        '</div>' +
+        '<div class="tool-children"><div style="padding:10px;font-size:12px;white-space:pre-wrap;line-height:1.6">' + esc(s.content) + '</div></div>' +
+      '</div>';
+    }).join('');
+  }
+}
+
+function showBP(idx, btn) {
+  if (!window._bpData) return;
+  $('bp-content').textContent = window._bpData[idx].content;
+  // Update active tab style
+  document.querySelectorAll('#bp-tabs button').forEach(b => b.style.background = '');
+  btn.style.background = 'rgba(88,166,255,.15)';
+}
+
 async function refreshAll() {
-  const [status, procs, sessions, logs] = await Promise.all([
-    api('/api/status'), api('/api/processes'), api('/api/sessions'), api('/api/logs')
+  const [status, procs, sessions, logs, knowledge] = await Promise.all([
+    api('/api/status'), api('/api/processes'), api('/api/sessions'), api('/api/logs'), api('/api/knowledge')
   ]);
   renderStatus(status);
   renderProcesses(procs);
   renderSessions(sessions);
   renderLogs(logs);
+  renderKnowledge(knowledge);
 }
 
 function startAutoRefresh() {

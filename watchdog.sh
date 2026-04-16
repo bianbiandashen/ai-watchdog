@@ -10,6 +10,7 @@ source "${SCRIPT_DIR}/lib/utils.sh"
 source "${SCRIPT_DIR}/lib/monitor.sh"
 source "${SCRIPT_DIR}/lib/cleanup.sh"
 source "${SCRIPT_DIR}/lib/recovery.sh"
+source "${SCRIPT_DIR}/lib/memory.sh"
 
 mkdir -p "$LOG_DIR" "$SNAPSHOT_DIR"
 
@@ -86,10 +87,12 @@ main_loop() {
         # 2. Always scan for MCP orphan swarms
         cleanup_orphans
 
-        # 3. Periodic log cleanup (every 60 cycles ≈ 30 min)
+        # 3. Periodic tasks (every 60 cycles ≈ 30 min)
         if (( CYCLES % 60 == 0 )); then
             cleanup_old_logs
             save_snapshot
+            # Personal memory: summarize recent sessions
+            generate_summary 2>/dev/null || true
         fi
 
         # 4. State file (for TUI)

@@ -440,33 +440,26 @@ function rebuildBrains() {
     }
   } catch {}
 
-  // 3. Rebuild each BRAIN.md — user messages first (highest weight)
+  // 3. Write brain/ sub-files — user messages to user-focus.md, summaries to learnings.md
   let updated = 0;
+  const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
   for (const [proj, data] of Object.entries(projects)) {
-    const brainFile = path.join(SMART_HOME, proj, 'BRAIN.md');
-    if (!fs.existsSync(brainFile)) continue;
+    const brainDir = path.join(SMART_HOME, proj, 'brain');
+    if (!fs.existsSync(brainDir)) { try { fs.mkdirSync(brainDir, { recursive: true }); } catch {} }
 
-    // Read existing static content (everything before "## 我最近在关注")
-    let existing = fs.readFileSync(brainFile, 'utf8');
-    const cutMark = '## 我最近在关注';
-    const cutIdx = existing.indexOf(cutMark);
-    const staticPart = cutIdx >= 0 ? existing.substring(0, cutIdx).trimEnd() : existing.trimEnd();
+    // user-focus.md — highest weight: user's own messages
+    if (data.userMsgs.length > 0) {
+      const userContent = '# 我最近在关注\n> 权重最高 — 这些是我本人发的消息，代表当前关注点\n> Updated: ' + ts + '\n\n' +
+        [...new Set(data.userMsgs)].slice(0, 15).map(m => '- ' + m).join('\n') + '\n';
+      fs.writeFileSync(path.join(brainDir, 'user-focus.md'), userContent);
+    }
 
-    // Build dynamic section
-    const userSection = data.userMsgs.length > 0
-      ? '## 我最近在关注\n> 权重最高 — 这些是我本人发的消息，代表我当前的关注点\n\n' +
-        [...new Set(data.userMsgs)].slice(0, 10).map(m => '- ' + m).join('\n')
-      : '';
-
-    const sumSection = data.summaries.length > 0
-      ? '\n\n## 近期会话总结\n> AI 生成的摘要，帮助延续上下文\n\n' +
-        data.summaries.join('\n---\n').substring(0, 1500)
-      : '';
-
-    const newContent = staticPart + '\n\n' + userSection + sumSection +
-      '\n\n---\n_Last updated: ' + new Date().toISOString().replace('T', ' ').substring(0, 19) + ' by ai-watchdog_\n';
-
-    fs.writeFileSync(brainFile, newContent);
+    // learnings.md — accumulated from summaries
+    if (data.summaries.length > 0) {
+      const learnContent = '# 近期会话总结\n> AI 生成的摘要，帮助延续上下文\n> Updated: ' + ts + '\n\n' +
+        data.summaries.join('\n\n---\n\n').substring(0, 2000) + '\n';
+      fs.writeFileSync(path.join(brainDir, 'learnings.md'), learnContent);
+    }
     updated++;
   }
   return { ok: true, updated };
@@ -477,10 +470,16 @@ function getBrains() {
     const projects = fs.readdirSync(SMART_HOME, { withFileTypes: true })
       .filter(d => d.isDirectory() && d.name !== '.git' && d.name !== 'best-practices');
     return projects.map(d => {
-      const brainFile = path.join(SMART_HOME, d.name, 'BRAIN.md');
-      if (!fs.existsSync(brainFile)) return null;
-      const content = fs.readFileSync(brainFile, 'utf8');
-      return { project: d.name, content, size: content.length };
+      const brainDir = path.join(SMART_HOME, d.name, 'brain');
+      if (!fs.existsSync(brainDir)) return null;
+      // Read all .md files in brain/ and concatenate
+      const files = fs.readdirSync(brainDir).filter(f => f.endsWith('.md')).sort();
+      const parts = files.map(f => {
+        const content = fs.readFileSync(path.join(brainDir, f), 'utf8').trim();
+        return { file: f, content, size: content.length };
+      }).filter(p => p.size > 0);
+      const fullContent = parts.map(p => p.content).join('\n\n---\n\n');
+      return { project: d.name, files: parts, content: fullContent, size: fullContent.length };
     }).filter(Boolean);
   } catch { return []; }
 }

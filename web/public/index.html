@@ -511,31 +511,43 @@ const CMD_CARDS = [
     url: 'https://github.com/obra/superpowers',
     tagline: '7-Stage Workflow: Brainstorm → Plan → Execute → TDD → Review → Verify → Finish',
     commands: [
-      { label: 'Enter plan mode', cmd: 'claude /plan', desc: '进入计划模式，不跳过' },
-      { label: 'Git worktree isolation', cmd: 'git worktree add .worktrees/feat-xyz -b feat/xyz', desc: '每个任务隔离工作区' },
-      { label: 'Add to CLAUDE.md', cmd: '## Workflow Rules\n- Never jump to code without a plan\n- Write plans for "an enthusiastic junior engineer"\n- Never accept "done" without evidence\n- Each task gets its own git worktree', desc: '复制到项目 CLAUDE.md 增强工作流' },
+      { label: 'Enter plan mode', cmd: '/plan', desc: '进入计划模式，不跳过直接写代码' },
+      { label: 'Git worktree isolation', cmd: 'git worktree add .worktrees/feat-xyz -b feat/xyz\ncd .worktrees/feat-xyz', desc: '每个任务隔离工作区，防交叉污染' },
+      { label: 'Subagent dispatch', cmd: '/dispatch "task description" --parallel 3', desc: '拆成并行子任务分派给 subagent' },
+      { label: 'TDD first', cmd: '# Write test BEFORE implementation\n# Red → Green → Refactor', desc: '测试驱动，先写失败测试再实现' },
+      { label: 'Verification gate', cmd: '# Before declaring "done":\n# 1. Tests pass\n# 2. Screenshot/curl proof\n# 3. Edge cases checked', desc: '完成前必须拿出证据证明它能用' },
+      { label: 'Code review request', cmd: '/review --focus security,performance,edge-cases', desc: '请求代码审查，指定关注点' },
+      { label: 'CLAUDE.md workflow block', cmd: '## Workflow (from superpowers)\n- Never jump to code without /plan\n- Plans must pass the "junior engineer" test\n- Never accept "done" without evidence\n- Each task gets its own git worktree\n- TDD: write test first, then implement\n- Request /review before merge\n- Run /verify before declaring complete', desc: '复制到 CLAUDE.md 一键增强 7 阶段' },
     ],
-    howto: '复制 "Add to CLAUDE.md" 代码块 → 粘贴到项目 CLAUDE.md → Claude 自动遵循 7 阶段'
+    howto: '复制最后一项 → 粘贴到项目 CLAUDE.md → Claude 自动遵循 7 阶段工作流'
   },
   { name: 'gstack', color: 'var(--yellow)', icon: 'B',
     url: 'https://github.com/garrytan/gstack',
     tagline: '"Boil the Lake" — Completeness is cheap, do 100% not 90%',
     commands: [
-      { label: 'Search before building', cmd: '# Always search first:\n# "{runtime} {thing} built-in"\n# "{thing} best practice 2026"', desc: '先搜后写，避免重复造轮子' },
-      { label: 'AI Slop Scan', cmd: '## AI Code Quality Scan\n- [ ] Empty catch blocks?\n- [ ] Redundant return await?\n- [ ] Untyped exceptions?\n- [ ] Unnecessary abstractions?\n- [ ] Additions beyond what was asked?', desc: '每次 review 必查的 AI 代码坏味道' },
-      { label: 'E2E Blame Protocol', cmd: '## Test Attribution\n- Never claim failure is "pre-existing" without proof\n- Run same test on main first\n- If unverifiable, say "unverified"', desc: '测试归因规则' },
+      { label: 'Search before building', cmd: '# Before writing ANY code, search:\n# "{runtime} {thing} built-in"\n# "{thing} best practice 2026"\n# Check Layer 1 (stdlib) → Layer 2 (community) → Layer 3 (custom)', desc: '先搜后写，3 层知识检索' },
+      { label: 'AI Slop Scan', cmd: '## AI Slop Scan\n- [ ] Empty catch blocks?\n- [ ] Redundant return await?\n- [ ] Untyped exception handlers?\n- [ ] Unnecessary abstractions?\n- [ ] "Helpful" additions beyond scope?\n- [ ] Comments restating code?\n- [ ] Feature flags for one-off changes?', desc: '7 项 AI 代码坏味道检查清单' },
+      { label: 'E2E Blame Protocol', cmd: '## Test Attribution Rule\n- Never claim failure is "pre-existing" without proof\n- Run same test on main first: git stash && npm test\n- If unverifiable, say "unverified"\n- Zero tolerance for "works on my machine"', desc: '测试失败归因，不甩锅' },
+      { label: 'Boil the Lake', cmd: '# "Completeness is cheap"\n# Do 100% implementation, not 90% shortcut\n# BUT: distinguish lakes (achievable) from oceans (unrealistic)', desc: 'AI 让完整实现几乎零边际成本' },
+      { label: 'Branch CHANGELOG', cmd: '## CHANGELOG entry format\n### [version] - YYYY-MM-DD\n- feat: description that inspires someone to try it\n- fix: what broke and how it was fixed', desc: '每个分支写变更日志，面向用户' },
+      { label: 'AI compression table', cmd: '# AI Effort Compression:\n# Scaffolding:  ~100x faster\n# CRUD:         ~50x\n# Tests:        ~20x\n# Refactoring:  ~10x\n# Architecture: ~3-5x\n# Debugging:    ~2-5x', desc: '6 级 AI 效率压缩比参考' },
+      { label: 'CLAUDE.md quality block', cmd: '## Code Quality (from gstack)\n- Completeness is cheap — do the full implementation\n- Search before building: check built-in first\n- AI recommends, user decides, never skip verification\n- Run AI Slop Scan on every review\n- E2E Blame Protocol: never claim "pre-existing" without proof\n- Write changelogs for users, not contributors\n- Know your compression ratio: scaffolding ~100x, architecture ~3-5x', desc: '复制到 CLAUDE.md 一键增强代码质量' },
     ],
-    howto: 'AI 压缩比: 脚手架 ~100x | CRUD ~50x | 测试 ~20x | 架构 ~3-5x'
+    howto: 'AI 压缩比: 脚手架 ~100x | CRUD ~50x | 测试 ~20x | 重构 ~10x | 架构 ~3-5x'
   },
   { name: 'compound-engineering', color: 'var(--purple)', icon: 'C',
     url: 'https://github.com/EveryInc/compound-engineering-plugin',
     tagline: 'Compound Loop: Plan → Work → Review → COMPOUND → Repeat | 80% 规划 / 20% 执行',
     commands: [
-      { label: 'AGENTS.md canonical', cmd: '# CLAUDE.md (one-line shim):\nSee @AGENTS.md for all instructions.\n\n# AGENTS.md (canonical — works across all AI tools)', desc: '多工具统一: AGENTS.md 为主，CLAUDE.md 做跳转' },
-      { label: 'Docs 4-category', cmd: 'mkdir -p docs/{brainstorms,plans,specs,solutions}', desc: '知识生命周期: brainstorms → plans → specs → solutions' },
-      { label: 'Scratch space', cmd: 'mkdir -p .context/$(basename $(pwd))\n# Inter-skill state in .context/\n# Throwaway in mktemp -d\n# Durable in docs/', desc: '临时状态管理约定' },
+      { label: 'AGENTS.md canonical', cmd: '# CLAUDE.md → one-line shim:\nSee @AGENTS.md for all instructions.\n\n# AGENTS.md → canonical (works across Claude/Codex/Cursor/Orba)', desc: '多工具统一: AGENTS.md 做主文件' },
+      { label: 'Docs 4-category', cmd: 'mkdir -p docs/{brainstorms,plans,specs,solutions}', desc: '知识生命周期: 想法→计划→规格→方案' },
+      { label: 'Scratch space', cmd: 'mkdir -p .context/$(basename $(pwd))\n# .context/   → inter-skill state (readable by other skills)\n# mktemp -d   → throwaway artifacts\n# docs/       → durable outputs (committed)', desc: '3 层临时状态管理约定' },
+      { label: 'Compound step', cmd: '# After EVERY task, ask:\n# 1. What worked? → save to brain/learnings.md\n# 2. What failed? → save as anti-pattern\n# 3. What would I do differently? → update CLAUDE.md', desc: '每次任务结束显式总结学到什么' },
+      { label: 'Multi-agent review', cmd: '# Run 4 specialized reviews:\n# 1. Correctness: does it do what was asked?\n# 2. Security: injection, XSS, auth bypass?\n# 3. Performance: N+1, unbounded loops, leaks?\n# 4. Edge cases: null, empty, max, concurrent?', desc: '4 维度多 agent 审查流水线' },
+      { label: 'Self-contained skills', cmd: '# Skill design rules:\n# - Each skill is self-contained (no cross-dir refs)\n# - If two skills need same file, duplicate it\n# - Use fully-qualified names: plugin:category:name\n# - Commit prefix by intent, not file type', desc: 'Skill 设计 4 条黄金规则' },
+      { label: 'CLAUDE.md compound block', cmd: '## Compound Engineering Rules\n- 80% planning + review, 20% execution\n- AGENTS.md is canonical, CLAUDE.md is a shim\n- Docs lifecycle: brainstorms/ → plans/ → specs/ → solutions/\n- After every task run the Compound step\n- Scratch: .context/ for state, mktemp for throwaway, docs/ for durable\n- Skills must be self-contained, no cross-directory refs\n- Run multi-agent review before merge (correctness, security, perf, edge)', desc: '复制到 CLAUDE.md 一键增强复合工程' },
     ],
-    howto: '关键: 每次任务结束跑 Compound 步骤 — 显式总结学到了什么，写到 learnings/'
+    howto: '关键: 每次任务结束跑 Compound 步骤 — 显式总结写到 brain/learnings.md'
   }
 ];
 

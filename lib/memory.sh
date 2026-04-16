@@ -1,46 +1,70 @@
 #!/usr/bin/env bash
 # Personal memory module — summarize recent Claude/Codex sessions every 30 min
-# Uses LiteLLM-compatible API for summarization (reads from .env, never committed)
+# Writes to ~/billion-smart/<project>/summaries/ (per-repo) or _global/summaries/
+# Uses LiteLLM-compatible API (reads from .env, never committed)
 
-MEMORY_DIR="${WATCHDOG_HOME}/docs/memory/summaries"
-BEST_PRACTICES_DIR="${WATCHDOG_HOME}/docs/memory/best-practices"
+SMART_HOME="$HOME/billion-smart"
 ENV_FILE="${WATCHDOG_HOME}/.env"
 
-# Load API config from .env (NEVER committed to git)
+# Known repos → folder name mapping
+declare -A REPO_MAP=(
+    ["/Users/billion_bian/devin"]="devin"
+    ["/Users/billion_bian/orba-desktop"]="orba-desktop"
+    ["/Users/billion_bian/orba-memorybank-cli"]="orba-memorybank-cli"
+    ["/Users/billion_bian/orba"]="orba"
+    ["/Users/billion_bian/ai-watchdog"]="ai-watchdog"
+    ["/Users/billion_bian"]="_global"
+)
+
+# Resolve a working directory to a billion-smart folder
+resolve_project() {
+    local cwd="$1"
+    for repo in "${!REPO_MAP[@]}"; do
+        if [[ "$cwd" == "$repo"* ]]; then
+            echo "${REPO_MAP[$repo]}"
+            return
+        fi
+    done
+    echo "_global"
+}
+
 load_api_config() {
     if [[ -f "$ENV_FILE" ]]; then
-        export $(grep -v '^#' "$ENV_FILE" | grep -v '^$' | xargs)
+        set -a
+        source "$ENV_FILE"
+        set +a
     fi
-    # Fallback to environment
     OPENAI_API_KEY="${OPENAI_API_KEY:-}"
     OPENAI_BASE_URL="${OPENAI_BASE_URL:-}"
     SUMMARY_MODEL="${SUMMARY_MODEL:-anthropic/claude-opus-4.6}"
 }
 
-# Call LLM API via curl
 call_llm() {
     local prompt="$1"
     local max_tokens="${2:-1024}"
-    [[ -z "$OPENAI_API_KEY" ]] && { log_warn "MEMORY: No API key, skip summarization"; return 1; }
+    [[ -z "$OPENAI_API_KEY" ]] && { log_warn "MEMORY: No API key"; return 1; }
+
+    local payload
+    payload=$(python3 -c "
+import json, sys
+prompt = sys.stdin.read()
+print(json.dumps({
+    'model': '$SUMMARY_MODEL',
+    'max_tokens': $max_tokens,
+    'messages': [
+        {'role': 'system', 'content': 'You are a concise technical summarizer. Output markdown. Focus on: what was asked, what was decided, key learnings. Keep under 500 words.'},
+        {'role': 'user', 'content': prompt}
+    ]
+}))
+" <<< "$prompt")
 
     local response
-    response=$(curl -s --max-time 30 \
+    response=$(curl -s --max-time 60 \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer ${OPENAI_API_KEY}" \
         "${OPENAI_BASE_URL}/chat/completions" \
-        -d "$(cat <<PAYLOAD
-{
-  "model": "${SUMMARY_MODEL}",
-  "max_tokens": ${max_tokens},
-  "messages": [
-    {"role": "system", "content": "You are a concise technical summarizer. Output markdown. Focus on: what was asked, what was decided, key learnings. Keep under 500 words."},
-    {"role": "user", "content": $(echo "$prompt" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')}
-  ]
-}
-PAYLOAD
-)")
+        -d "$payload")
 
-    # Extract content from response
     echo "$response" | python3 -c "
 import json, sys
 try:
@@ -51,95 +75,137 @@ except Exception as e:
 " 2>/dev/null
 }
 
-# Extract recent questions/answers from Claude session files
-extract_recent_claude_context() {
-    local hours="${1:-1}"  # last N hours
-    local cutoff
-    cutoff=$(date -v-${hours}H +%s 2>/dev/null || date -d "${hours} hours ago" +%s 2>/dev/null || echo 0)
-
-    local context=""
-    find "$HOME/.claude/projects" -name '*.jsonl' -type f -newer /tmp/.watchdog-memory-marker 2>/dev/null | while read -r f; do
-        python3 -c "
-import json, sys
-lines = open('$f').readlines()[-50:]  # last 50 messages
-for line in lines:
-    try:
-        d = json.loads(line)
-        role = d.get('type', d.get('role', ''))
-        msg = d.get('message', {})
-        content = msg.get('content', '') if isinstance(msg, dict) else str(msg)
-        if isinstance(content, list):
-            texts = [c.get('text','') for c in content if isinstance(c, dict) and c.get('type') == 'text']
-            content = ' '.join(texts)
-        if content and role in ('user', 'assistant'):
-            text = str(content).strip()[:200]
-            if text:
-                print(f'[{role}] {text}')
-    except: pass
-" 2>/dev/null
-    done
-}
-
-# Generate a 30-min summary
-generate_summary() {
-    load_api_config
-    mkdir -p "$MEMORY_DIR"
-
-    # Touch marker file for "last summarized" time
+# Scan recent Claude sessions, group by project directory
+scan_recent_sessions() {
     local marker="/tmp/.watchdog-memory-marker"
     [[ ! -f "$marker" ]] && touch -t "$(date -v-30M '+%Y%m%d%H%M.%S')" "$marker" 2>/dev/null
 
-    # Extract recent context
-    local context
-    context=$(extract_recent_claude_context 1)
+    python3 - "$HOME/.claude/projects" "$marker" <<'PYEOF'
+import os, sys, json, stat
 
-    if [[ -z "$context" || ${#context} -lt 100 ]]; then
-        log_debug "MEMORY: Not enough recent context to summarize"
-        touch "$marker"
-        return 0
-    fi
+projects_dir = sys.argv[1]
+marker = sys.argv[2]
+marker_mtime = os.stat(marker).st_mtime if os.path.exists(marker) else 0
 
-    log_info "MEMORY: Generating 30-min summary..."
+results = {}  # cwd -> list of messages
 
-    local summary
-    summary=$(call_llm "Summarize the following AI coding session activity from the last 30 minutes. Extract: (1) What questions were asked, (2) What decisions were made, (3) Key learnings or patterns discovered, (4) Any unresolved issues.
+for project_name in os.listdir(projects_dir):
+    project_path = os.path.join(projects_dir, project_name)
+    if not os.path.isdir(project_path):
+        continue
 
---- SESSION CONTEXT ---
-$context
---- END ---
+    # Decode project dir name to cwd: -Users-billion-bian-devin -> /Users/billion_bian/devin
+    cwd = '/' + project_name.lstrip('-').replace('-', '/')
 
-Output as a concise markdown summary with sections: Questions, Decisions, Learnings, Open Issues.")
+    for fname in os.listdir(project_path):
+        if not fname.endswith('.jsonl'):
+            continue
+        fpath = os.path.join(project_path, fname)
+        if os.stat(fpath).st_mtime < marker_mtime:
+            continue
 
-    if [[ -n "$summary" && "$summary" != *"summarization failed"* ]]; then
-        local ts
-        ts=$(date '+%Y%m%d_%H%M')
-        local outfile="${MEMORY_DIR}/${ts}.md"
-        cat > "$outfile" <<EOF
+        # Read last 30 messages
+        try:
+            with open(fpath) as f:
+                lines = f.readlines()[-30:]
+            for line in lines:
+                try:
+                    d = json.loads(line)
+                    role = d.get('type', d.get('role', ''))
+                    msg = d.get('message', {})
+                    content = msg.get('content', '') if isinstance(msg, dict) else str(msg)
+                    if isinstance(content, list):
+                        texts = [c.get('text', '') for c in content if isinstance(c, dict) and c.get('type') == 'text']
+                        content = ' '.join(texts)
+                    if content and role in ('user', 'assistant'):
+                        text = str(content).strip()[:300]
+                        if text and len(text) > 10:
+                            if cwd not in results:
+                                results[cwd] = []
+                            results[cwd].append(f'[{role}] {text}')
+                except:
+                    pass
+        except:
+            pass
+
+# Output: one line per project, tab-separated: cwd \t message_count \t context_preview
+for cwd, msgs in results.items():
+    context = '\n'.join(msgs[-20:])  # last 20 messages per project
+    # Print as: cwd<TAB>count<TAB>context (context newlines escaped)
+    escaped = context.replace('\n', '\\n').replace('\t', ' ')
+    print(f'{cwd}\t{len(msgs)}\t{escaped}')
+PYEOF
+}
+
+generate_summary() {
+    load_api_config
+    mkdir -p "$SMART_HOME/_global/summaries"
+
+    local marker="/tmp/.watchdog-memory-marker"
+
+    # Scan sessions grouped by project
+    local found_any=false
+    while IFS=$'\t' read -r cwd count context; do
+        [[ -z "$cwd" || -z "$context" ]] && continue
+        (( count < 3 )) && continue  # skip very short sessions
+        found_any=true
+
+        # Resolve to billion-smart folder
+        local project
+        project=$(resolve_project "$cwd")
+        local out_dir="${SMART_HOME}/${project}/summaries"
+        mkdir -p "$out_dir"
+
+        log_info "MEMORY: Summarizing $cwd ($count msgs) -> $project"
+
+        # Unescape context
+        local real_context
+        real_context=$(echo -e "$context")
+
+        local summary
+        summary=$(call_llm "Summarize this AI coding session in project '$cwd'. Extract:
+1. **Questions Asked** — what the user wanted to know
+2. **Decisions Made** — what was chosen and why
+3. **Key Learnings** — patterns, gotchas, discoveries
+4. **Open Issues** — unresolved problems
+
+--- SESSION ($count messages) ---
+$real_context
+--- END ---")
+
+        if [[ -n "$summary" && "$summary" != *"summarization failed"* ]]; then
+            local ts
+            ts=$(date '+%Y%m%d_%H%M')
+            cat > "${out_dir}/${ts}.md" <<EOF
 # Session Summary — $(date '+%Y-%m-%d %H:%M')
+**Project:** $cwd
+**Messages:** $count
 
 $summary
 
 ---
 _Generated by ai-watchdog memory module_
 EOF
-        log_info "MEMORY: Summary saved to $outfile"
+            log_info "MEMORY: Saved ${out_dir}/${ts}.md"
+        fi
 
-        # Keep only last 48 summaries (24 hours at 30-min intervals)
-        ls -t "${MEMORY_DIR}"/*.md 2>/dev/null | tail -n +49 | xargs rm -f 2>/dev/null
-    else
-        log_warn "MEMORY: Summarization returned empty or failed"
+        # Keep only last 48 summaries per project
+        ls -t "${out_dir}"/*.md 2>/dev/null | tail -n +49 | xargs rm -f 2>/dev/null
+
+    done < <(scan_recent_sessions)
+
+    if ! $found_any; then
+        log_debug "MEMORY: No recent session activity to summarize"
     fi
 
     touch "$marker"
 }
 
-# List recent summaries (for TUI/web)
 list_recent_summaries() {
     local n="${1:-5}"
-    ls -t "${MEMORY_DIR}"/*.md 2>/dev/null | head -"$n"
+    find "$SMART_HOME" -name '*.md' -path '*/summaries/*' -type f 2>/dev/null | xargs ls -t 2>/dev/null | head -"$n"
 }
 
-# List best practices files
 list_best_practices() {
-    ls "${BEST_PRACTICES_DIR}"/*.md 2>/dev/null
+    ls "${SMART_HOME}/best-practices/"*.md 2>/dev/null
 }

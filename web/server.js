@@ -80,29 +80,49 @@ function getMCPToolName(cmd) {
   return m ? m[1] : 'MCP Server';
 }
 
-// Walk up the process tree to find the session owner (claude, codex, cursor, orba, etc.)
+// Bulk process tree — ONE ps call instead of N×6
+let _procTree = null;
+let _procTreeTs = 0;
+function buildProcTree() {
+  const now = Date.now();
+  if (_procTree && now - _procTreeTs < 5000) return _procTree;
+  _procTree = {};
+  const lines = sh('ps -axo pid=,ppid=,command= 2>/dev/null').split('\n');
+  for (const line of lines) {
+    const m = line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/);
+    if (!m) continue;
+    _procTree[m[1]] = { ppid: m[2], cmd: m[3] };
+  }
+  _procTreeTs = now;
+  return _procTree;
+}
+
 function getOwner(pid) {
+  const tree = buildProcTree();
   const ownerRe = /\b(claude|codex|orba-cli|Cursor|OrbaDesktop|Warp)\b/;
   let cur = String(pid);
   for (let i = 0; i < 6; i++) {
-    if (!cur || cur === '1' || cur === '0') break;
-    const ppid = sh(`ps -o ppid= -p ${cur} 2>/dev/null`).trim();
+    const node = tree[cur];
+    if (!node) return { tool: 'orphan', hint: 'parent dead' };
+    const ppid = node.ppid;
     if (!ppid || ppid === '1' || ppid === '0') {
-      // Reached launchd — check current node's cmd for hints
-      const curCmd = sh(`ps -o command= -p ${cur} 2>/dev/null`).trim();
-      if (curCmd.includes('spanner') || curCmd.includes('benchmark')) return { tool: 'benchmark', hint: 'spanner-harness' };
-      return { tool: 'orphan', hint: 'parent dead (launchd)' };
+      if (node.cmd.includes('spanner') || node.cmd.includes('benchmark')) return { tool: 'benchmark', hint: 'spanner-harness' };
+      return { tool: 'orphan', hint: 'launchd' };
     }
-    const pcmd = sh(`ps -o command= -p ${ppid} 2>/dev/null`).trim();
-    if (!pcmd) { cur = ppid; continue; }
-    const m = pcmd.match(ownerRe);
-    if (m) {
-      const cwdMatch = pcmd.match(/--(?:project|cwd|resume)\s+(\S+)/);
-      return { tool: m[1], hint: cwdMatch ? cwdMatch[1].split('/').pop() : '' };
-    }
+    const parent = tree[ppid];
+    if (!parent) return { tool: 'orphan', hint: 'parent gone' };
+    const m = parent.cmd.match(ownerRe);
+    if (m) return { tool: m[1], hint: '' };
     cur = ppid;
   }
   return { tool: '?', hint: '' };
+}
+
+function isOrphanFast(pid) {
+  const tree = buildProcTree();
+  const node = tree[String(pid)];
+  if (!node) return true;
+  return node.ppid === '1';
 }
 
 // Port cache (lsof is slow)
@@ -159,7 +179,7 @@ function getMCPProcesses() {
       p.toolName = getMCPToolName(p.cmd);
       p.ports = getListenPorts(p.pid);
       p.owner = getOwner(p.pid);
-      p.orphan = (p.owner.tool === 'orphan' || isOrphan(p.pid));
+      p.orphan = (p.owner.tool === 'orphan' || isOrphanFast(p.pid));
       p.cmdShort = p.cmd.substring(0, 120);
       procs.push(p);
     }

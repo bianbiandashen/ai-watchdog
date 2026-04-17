@@ -91,8 +91,11 @@ main_loop() {
         if (( CYCLES % 60 == 0 )); then
             cleanup_old_logs
             save_snapshot
-            # Personal memory: summarize recent sessions
+            # Personal memory: summarize recent sessions, then re-index into PageIndex
             generate_summary 2>/dev/null || true
+            run_pageindex_reindex 2>/dev/null || true
+            # Refresh LLM-powered session summaries for web dashboard
+            refresh_dashboard_summaries 2>/dev/null || true
         fi
 
         # 4. State file (for TUI)

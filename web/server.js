@@ -14,6 +14,23 @@ const LOG_FILE = path.join(ROOT, 'logs', 'watchdog.log');
 const CLAUDE_PROJECTS = path.join(os.homedir(), '.claude', 'projects');
 const CODEX_HISTORY = path.join(os.homedir(), '.codex', 'history.jsonl');
 const ORBA_DIR = path.join(os.homedir(), '.orba');
+const https = require('https');
+const SUMMARY_CACHE_FILE = path.join(ROOT, 'logs', 'session-summaries.json');
+
+// Load .env for LLM API config
+const ENV_FILE = path.join(ROOT, '.env');
+let LLM_API_KEY = '', LLM_BASE_URL = '', LLM_MODEL = 'anthropic/claude-opus-4.6';
+try {
+  for (const line of fs.readFileSync(ENV_FILE, 'utf8').split('\n')) {
+    const l = line.trim();
+    if (!l || l.startsWith('#')) continue;
+    const [k, ...rest] = l.split('=');
+    const v = rest.join('=');
+    if (k === 'OPENAI_API_KEY') LLM_API_KEY = v;
+    else if (k === 'OPENAI_BASE_URL') LLM_BASE_URL = v;
+    else if (k === 'SUMMARY_MODEL') LLM_MODEL = v;
+  }
+} catch {}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function sh(cmd) {
@@ -228,6 +245,7 @@ function getToolProcesses() {
 function getClaudeSessions(n = 5) {
   try {
     const allFiles = [];
+    const cache = loadSummaryCache();
     const projectDirs = fs.readdirSync(CLAUDE_PROJECTS, { withFileTypes: true })
       .filter(d => d.isDirectory()).map(d => path.join(CLAUDE_PROJECTS, d.name));
 
@@ -239,28 +257,37 @@ function getClaudeSessions(n = 5) {
         const sessionId = f.replace('.jsonl', '');
         const projectDir = path.basename(dir);
         const cwd = '/' + projectDir.replace(/^-/, '').replace(/-/g, '/');
-        // Extract summary
-        let summary = '(no summary)';
-        try {
-          const lines = fs.readFileSync(fp, 'utf8').split('\n').filter(Boolean);
-          for (const line of lines) {
-            try {
-              const d = JSON.parse(line);
-              if (d.type === 'user' && d.message) {
-                const msg = d.message;
-                let content = typeof msg === 'object' ? (msg.content || '') : msg;
-                if (Array.isArray(content)) {
-                  const t = content.find(c => c && c.type === 'text');
-                  content = t ? t.text : '';
+
+        // Prefer LLM-generated summary from cache
+        let summary = '';
+        const cached = cache[sessionId];
+        if (cached && cached.summary) {
+          summary = cached.summary;
+        } else {
+          // Fallback: first user message
+          try {
+            const lines = fs.readFileSync(fp, 'utf8').split('\n').filter(Boolean);
+            for (const line of lines) {
+              try {
+                const d = JSON.parse(line);
+                if (d.type === 'user' && d.message) {
+                  const msg = d.message;
+                  let content = typeof msg === 'object' ? (msg.content || '') : msg;
+                  if (Array.isArray(content)) {
+                    const t = content.find(c => c && c.type === 'text');
+                    content = t ? t.text : '';
+                  }
+                  if (content && typeof content === 'string') {
+                    summary = content.trim().split('\n')[0].substring(0, 60);
+                    break;
+                  }
                 }
-                if (content && typeof content === 'string') {
-                  summary = content.trim().split('\n')[0].substring(0, 60);
-                  break;
-                }
-              }
-            } catch {}
-          }
-        } catch {}
+              } catch {}
+            }
+          } catch {}
+        }
+        if (!summary) summary = '(no summary)';
+
         allFiles.push({ sessionId, cwd, ts: stat.mtimeMs / 1000, summary, size: stat.size, tool: 'claude' });
       }
     }
@@ -390,6 +417,127 @@ function getBestPractices() {
       const content = fs.readFileSync(path.join(dir, f), 'utf8');
       return { name: f.replace('.md', ''), content };
     });
+  } catch { return []; }
+}
+
+// ── LLM Session Summary ─────────────────────────────────────────────────────
+function callLLM(prompt, maxTokens = 256) {
+  return new Promise((resolve, reject) => {
+    if (!LLM_API_KEY || !LLM_BASE_URL) return reject(new Error('No LLM config'));
+    const url = new URL(LLM_BASE_URL + '/chat/completions');
+    const body = JSON.stringify({
+      model: LLM_MODEL,
+      max_tokens: maxTokens,
+      messages: [
+        { role: 'system', content: 'You are a concise session summarizer. Output a single line (under 60 chars) describing what the user is working on. No markdown, no quotes. Chinese if the user speaks Chinese, otherwise English.' },
+        { role: 'user', content: prompt }
+      ]
+    });
+    const opts = {
+      hostname: url.hostname, port: url.port || 443, path: url.pathname,
+      method: 'POST', headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${LLM_API_KEY}`,
+        'Content-Length': Buffer.byteLength(body)
+      }
+    };
+    const req = https.request(opts, res => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => {
+        try {
+          const j = JSON.parse(data);
+          resolve(j.choices[0].message.content.trim().substring(0, 80));
+        } catch (e) { reject(e); }
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(30000, () => { req.destroy(); reject(new Error('timeout')); });
+    req.end(body);
+  });
+}
+
+function loadSummaryCache() {
+  try { return JSON.parse(fs.readFileSync(SUMMARY_CACHE_FILE, 'utf8')); } catch { return {}; }
+}
+
+function saveSummaryCache(cache) {
+  try { fs.writeFileSync(SUMMARY_CACHE_FILE, JSON.stringify(cache, null, 2)); } catch {}
+}
+
+// Refresh LLM-generated summaries for active Claude sessions
+async function refreshSessionSummaries() {
+  const cache = loadSummaryCache();
+  const sessions = getClaudeSessionsRaw(5);
+  let updated = 0;
+
+  for (const s of sessions) {
+    // Skip if cached summary is fresh (< 25 min old) and session file hasn't changed
+    const cached = cache[s.sessionId];
+    if (cached && cached.ts > Date.now() - 25 * 60 * 1000 && cached.mtime >= s.mtime) continue;
+
+    // Gather user messages for LLM
+    const userMsgs = extractUserMessages(s.fp, 15);
+    if (userMsgs.length < 1) continue;
+
+    const prompt = `Summarize this coding session in one line:\n\n${userMsgs.join('\n')}`;
+    try {
+      const summary = await callLLM(prompt);
+      if (summary && summary.length > 3) {
+        cache[s.sessionId] = { summary, ts: Date.now(), mtime: s.mtime };
+        updated++;
+        console.log(`[Summary] ${s.cwd}: ${summary}`);
+      }
+    } catch (e) {
+      console.error(`[Summary error] ${s.sessionId}: ${e.message}`);
+    }
+  }
+  saveSummaryCache(cache);
+  return { ok: true, updated, total: Object.keys(cache).length };
+}
+
+function extractUserMessages(fp, n) {
+  try {
+    const lines = fs.readFileSync(fp, 'utf8').split('\n').filter(Boolean).slice(-50);
+    const msgs = [];
+    for (const line of lines) {
+      try {
+        const d = JSON.parse(line);
+        if (d.type !== 'user') continue;
+        const msg = d.message || {};
+        let content = typeof msg === 'object' ? (msg.content || '') : String(msg);
+        if (Array.isArray(content)) {
+          const t = content.find(c => c && c.type === 'text');
+          content = t ? t.text : '';
+        }
+        if (content && typeof content === 'string') {
+          const text = content.trim().split('\n')[0].substring(0, 200);
+          if (text.length > 5) msgs.push(`[user] ${text}`);
+        }
+      } catch {}
+    }
+    return msgs.slice(-n);
+  } catch { return []; }
+}
+
+// Raw session list with file paths (for summary refresh)
+function getClaudeSessionsRaw(n = 5) {
+  try {
+    const allFiles = [];
+    const projectDirs = fs.readdirSync(CLAUDE_PROJECTS, { withFileTypes: true })
+      .filter(d => d.isDirectory()).map(d => path.join(CLAUDE_PROJECTS, d.name));
+    for (const dir of projectDirs) {
+      const files = fs.readdirSync(dir).filter(f => f.endsWith('.jsonl'));
+      for (const f of files) {
+        const fp = path.join(dir, f);
+        const stat = fs.statSync(fp);
+        const sessionId = f.replace('.jsonl', '');
+        const projectDir = path.basename(dir);
+        const cwd = '/' + projectDir.replace(/^-/, '').replace(/-/g, '/');
+        allFiles.push({ sessionId, cwd, ts: stat.mtimeMs / 1000, mtime: stat.mtimeMs, fp, size: stat.size });
+      }
+    }
+    return allFiles.sort((a, b) => b.ts - a.ts).slice(0, n);
   } catch { return []; }
 }
 
@@ -619,6 +767,20 @@ const server = http.createServer((req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.writeHead(200);
     res.end(JSON.stringify(r));
+    return;
+  }
+
+  // POST /api/refresh-summaries — LLM-powered session summaries
+  if (method === 'POST' && pathname === '/api/refresh-summaries') {
+    refreshSessionSummaries().then(r => {
+      res.setHeader('Content-Type', 'application/json');
+      res.writeHead(200);
+      res.end(JSON.stringify(r));
+    }).catch(e => {
+      res.setHeader('Content-Type', 'application/json');
+      res.writeHead(500);
+      res.end(JSON.stringify({ error: e.message }));
+    });
     return;
   }
 

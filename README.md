@@ -6,10 +6,50 @@
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Zero Dependencies](https://img.shields.io/badge/deps-zero-brightgreen)
 
-**7×24 process guardian for Claude · Codex · Cursor · Orba · Warp on macOS — kills orphan MCP servers, guards memory, recovers sessions.**
+**7x24 AI coding infrastructure for individuals and teams on macOS.**
 
-> Woke up to find my Mac had **339 MB free** out of 48 GB — because **310 orphaned `server-qdrant.js`** MCP processes silently ate **16.4 GB** overnight.
-> `ai-watchdog` makes sure that never happens again.
+Two layers. One daemon. Zero npm dependencies.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     ai-watchdog                                 │
+│                                                                 │
+│  ┌─────────────────────────────┐  ┌──────────────────────────┐  │
+│  │     🅷  HARNESS LAYER       │  │   🅲  COMPOUND LAYER     │  │
+│  │     (Team Infrastructure)   │  │   (Personal Knowledge)   │  │
+│  │                             │  │                          │  │
+│  │  Orphan Reaper              │  │  Session Memory          │  │
+│  │  Memory Guard               │  │  LLM Summaries           │  │
+│  │  Swarm Detection            │  │  Project Brains          │  │
+│  │  Web Dashboard              │  │  PageIndex Semantic       │  │
+│  │  Session Recovery           │  │  Best Practices Library  │  │
+│  │  Log Janitor                │  │  Compound Loop           │  │
+│  │  LaunchAgent                │  │                          │  │
+│  └─────────────────────────────┘  └──────────────────────────┘  │
+│                                                                 │
+│  Supports: Claude · Codex · Cursor · Orba · Warp               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Why Two Layers?
+
+> Inspired by [superpowers](https://github.com/obra/superpowers), [compound-engineering](https://github.com/EveryInc/compound-engineering-plugin), and [gstack](https://github.com/garrytan/gstack).
+
+**Harness** solves the infrastructure problem that every AI-heavy team hits: MCP orphan processes, memory blowups, session loss. Deploy once, benefit the whole team.
+
+**Compound** solves the knowledge decay problem: "I solved this last week but forgot how." Every 30 minutes, the daemon captures what you learned and indexes it for semantic retrieval — making each session build on the last.
+
+```
+                  Compound Engineering Loop
+                  ═══════════════════════
+
+  Brainstorm → Plan → Work → Review → COMPOUND → Repeat
+                                         ↑
+                                   ai-watchdog automates this step
+                                   every 30 minutes
+```
 
 ---
 
@@ -25,30 +65,190 @@ Live ANSI dashboard with memory bars, process tables, session recovery, and keyb
 
 ---
 
-## The Problem
+# 🅷 Harness Layer — Team Infrastructure
 
-Every time you start a Claude Code / Codex / Cursor / Orba session, these tools spawn **MCP server child processes** (Qdrant, Playwright, Figma, mitmproxy, Chrome DevTools, etc.). When the parent session crashes or exits abnormally, the children keep running forever — consuming gigabytes of RAM.
+> **Audience:** Any team running AI coding tools on macOS.
+> **Goal:** Eliminate the class of problems where AI tools degrade the developer machine.
+
+### The Problem
+
+Every Claude / Codex / Cursor / Orba session spawns **MCP server child processes** (Qdrant, Playwright, Figma, mitmproxy, Chrome DevTools, etc.). When the parent crashes, the children become orphans and silently consume RAM.
 
 ```
-Morning discovery:
+Real incident:
   Orphan server-qdrant.js:  310 processes  →  16.4 GB RAM
   System free memory:                       →  339 MB
   Result:                                   →  Mac grinding to halt
 ```
 
-### What ai-watchdog does
+### Harness Capabilities
 
-| Capability | How |
-|---|---|
-| **Orphan reaper** | Scans every 30s, kills MCP server procs whose parent died (PPID=1) |
-| **Swarm detection** | Kills extras when N copies of the same MCP server exceed threshold |
-| **Memory guard** | Emergency cleanup when free RAM < 512 MB; "Clean to 60%" one-click |
-| **Web dashboard** | Real-time browser UI on `localhost:7474` — kill any process, export sessions |
-| **Live TUI** | ANSI terminal dashboard refreshing every 3s — memory bars, process counts |
-| **Session recovery** | Lists last 5 sessions for Claude and Codex, prints resume command |
-| **Log janitor** | Deletes `debug-*.log` older than 3 days from `.orba`, `.codex`, `.claude` |
-| **LaunchAgent** | Starts on login via launchd, restarts automatically if it crashes |
-| **Never kills CLI** | `claude`, `codex`, `Cursor`, `OrbaDesktop`, `Warp` — all protected |
+| Capability | How it works | Who benefits |
+|---|---|---|
+| **Orphan Reaper** | Scans every 30s, kills MCP procs with PPID=1 | Every developer on the team |
+| **Swarm Detection** | Kills extras when >2 copies of same MCP server exist | Heavy multi-session users |
+| **Memory Guard** | Emergency cleanup at <512 MB; targeted at <2 GB | Prevents machine lockups |
+| **Web Dashboard** | Real-time UI at `localhost:7474` — kill any process, export sessions | Quick triage during incidents |
+| **Terminal TUI** | ANSI dashboard refreshing every 3s — memory bars, process counts | Terminal-native users |
+| **Session Recovery** | Lists last 5 sessions per tool, prints resume commands | Anyone who lost a session |
+| **Log Janitor** | Deletes `debug-*.log` older than 3 days from `.orba/.codex/.claude` | Disk space hygiene |
+| **LaunchAgent** | Starts on login, auto-restarts on crash | Zero maintenance after install |
+| **Kill Protection** | `claude`, `codex`, `Cursor`, `Warp`, `OrbaDesktop` are NEVER touched | Safety guarantee |
+
+### Team Deployment
+
+```bash
+# On each developer's Mac:
+git clone git@github.com:bianbiandashen/ai-watchdog.git ~/ai-watchdog
+cd ~/ai-watchdog && ./install.sh
+
+# Optional: web dashboard
+node web/server.js &
+open http://localhost:7474
+```
+
+One-time install. Zero config. Survives reboots. No npm dependencies.
+
+### Configuration
+
+All thresholds in `config.sh`:
+
+```bash
+CHECK_INTERVAL=30              # scan every 30 seconds
+SYSTEM_MEM_MIN_FREE_MB=2048    # warn + cleanup when free < 2 GB
+SYSTEM_MEM_CRITICAL_MB=512     # emergency kill when free < 512 MB
+PROCESS_MEM_MAX_MB=4096        # kill single proc exceeding 4 GB
+ORPHAN_THRESHOLD=2             # keep at most 2 instances per MCP server
+LOG_MAX_AGE_DAYS=3             # delete debug logs older than 3 days
+```
+
+### What Gets Killed vs. Protected
+
+**Kill targets** (`ORPHAN_TARGET_PATTERNS`):
+`server-qdrant.js` · `orba-context-mcp` · `figma.*mcp` · `playwright.*mcp` · `ChromeDevTools.*mcp` · `mitmproxy.*mcp` · `proxyman.*mcp` · `plugin_miniprogram` · `mp-cli.*mcp` · `pageindex`
+
+**Never touched** (`NEVER_KILL_PATTERNS`):
+`claude` · `codex` · `Cursor` · `OrbaDesktop` · `Warp` · `claude.*--dangerously`
+
+---
+
+# 🅲 Compound Layer — Personal Knowledge System
+
+> **Audience:** Individual developers who want sessions to build on each other.
+> **Goal:** Automate the COMPOUND step — capture, index, and retrieve learnings across sessions.
+
+### The Knowledge Decay Problem
+
+```
+Monday:    Spent 2 hours debugging Spanner query timeout → found the fix
+Wednesday: Same issue. Forgot the fix. Spent 1.5 hours again.
+```
+
+The Compound Layer breaks this cycle. Every 30 minutes, the daemon:
+
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│  1. CAPTURE  │ ──→ │  2. DISTILL  │ ──→ │  3. INDEX    │
+│              │     │              │     │              │
+│ Scan active  │     │ LLM extracts │     │ PageIndex    │
+│ Claude/Codex │     │ structured   │     │ semantic     │
+│ sessions     │     │ learnings    │     │ search       │
+└──────────────┘     └──────────────┘     └──────────────┘
+         ↓                    ↓                    ↓
+   ~/.claude/          ~/billion-smart/      ~/billion-smart/
+   projects/           <project>/            pageindex-workspace/
+                       summaries/
+```
+
+### Compound Capabilities
+
+| Capability | What it does | Compound Loop stage |
+|---|---|---|
+| **Session Memory** | Every 30 min, scans Claude/Codex sessions and extracts context | CAPTURE |
+| **LLM Summaries** | Calls Claude Opus to generate structured session digests | DISTILL |
+| **Dashboard Summaries** | LLM-generated one-liner for each active session in the web UI | DISTILL |
+| **Project Brains** | Per-project `brain/` with `user-focus.md` (your messages) + `learnings.md` (AI summaries) | COMPOUND |
+| **PageIndex** | Semantic search over all accumulated knowledge (vector-free, LLM-reasoning) | RETRIEVE |
+| **Best Practices Library** | Curated patterns from superpowers, gstack, compound-engineering | REFERENCE |
+
+### The 30-Minute Cycle
+
+```
+Every 60 cycles (≈ 30 min), the daemon runs:
+
+  ① generate_summary        — LLM summarizes recent sessions → ~/billion-smart/<project>/summaries/
+  ② run_pageindex_reindex   — Re-indexes all markdown into PageIndex for semantic search
+  ③ refresh_dashboard_summaries — LLM generates one-line summaries for the web dashboard
+```
+
+### Summary Output Structure
+
+Each LLM summary follows the Compound methodology — 5 sections designed for reuse:
+
+```markdown
+### What Worked        — approaches to repeat
+### What Failed        — dead ends to avoid
+### Key Decisions      — choices and their reasoning
+### Learnings          — non-obvious discoveries (highest value)
+### Open Issues        — unresolved problems to revisit
+```
+
+### Knowledge Storage Layout
+
+```
+~/billion-smart/
+├── best-practices/           # Curated methodology references
+│   ├── superpowers.md        #   obra/superpowers patterns
+│   ├── compound-engineering.md #   EveryInc compound loop
+│   └── gstack.md             #   garrytan/gstack patterns
+├── <project>/                # Per-project knowledge (auto-created)
+│   ├── brain/
+│   │   ├── user-focus.md     #   Your recent messages (highest weight)
+│   │   └── learnings.md      #   AI-distilled session summaries
+│   └── summaries/
+│       ├── 20260417_1200.md  #   Individual session summaries
+│       └── ...               #   (keeps last 48 per project)
+├── _global/                  # Cross-project knowledge
+│   ├── brain/
+│   └── summaries/
+├── pageindex-workspace/      # PageIndex semantic index
+└── reindex.py                # Re-indexing script
+```
+
+### Setup: Personal Knowledge
+
+```bash
+# 1. Create the knowledge hub
+mkdir -p ~/billion-smart/.venv
+python3 -m venv ~/billion-smart/.venv
+
+# 2. Install PageIndex (optional, for semantic search)
+pip install pageindex  # or clone to /tmp/PageIndex
+
+# 3. Configure LLM API in ai-watchdog
+cat > ~/ai-watchdog/.env << 'EOF'
+OPENAI_API_KEY=your-key-here
+OPENAI_BASE_URL=https://your-litellm-endpoint
+SUMMARY_MODEL=anthropic/claude-opus-4.6
+EOF
+
+# 4. (Optional) Add PageIndex as MCP server in Claude Code
+# In ~/.claude/settings.json:
+# "mcpServers": { "pageindex": { "command": "python", "args": ["-m", "pageindex.mcp"] } }
+```
+
+### Querying Your Knowledge
+
+**From the Web Dashboard:**
+- Project Brains panel shows per-project brain content
+- Session summaries panel shows recent LLM digests
+- Best Practices panel shows methodology references
+
+**From Claude Code (with PageIndex MCP):**
+```
+> Search my knowledge base for learnings about Spanner query timeouts
+> What did I learn last week about MCP process management?
+```
 
 ---
 
@@ -61,6 +261,9 @@ Morning discovery:
 | Web dashboard | **Yes** | No | No | No | Yes |
 | Terminal TUI | **Yes** | No | No | Yes (Linux) | No |
 | Session recovery | **Yes** | No | No | No | View only |
+| LLM session summaries | **Yes** | No | No | No | No |
+| Semantic knowledge search | **Yes** | No | No | No | No |
+| Compound loop automation | **Yes** | No | No | No | No |
 | launchd auto-start | **Yes** | Yes | Yes | No | No |
 | macOS native | **Yes** | Yes | Yes | Linux only | Cross |
 | Zero dependencies | **Yes** | No (Python) | Yes | No (Rust) | No (Rust) |
@@ -70,7 +273,7 @@ Morning discovery:
 <details>
 <summary><strong>Architecture — Sequence Diagrams (click to expand)</strong></summary>
 
-### 1 · Orphan Accumulation (the problem)
+### 1 - Orphan Accumulation (the problem)
 
 ```mermaid
 sequenceDiagram
@@ -94,11 +297,11 @@ sequenceDiagram
         Note over MCP: Previous orphan still running!
     end
 
-    Note over MCP,OS: 310 orphans × 53 MB = 16.4 GB consumed
+    Note over MCP,OS: 310 orphans x 53 MB = 16.4 GB consumed
     OS-->>User: system grinds to halt (339 MB free)
 ```
 
-### 2 · Watchdog Normal Cycle
+### 2 - Harness: Normal Scan Cycle
 
 ```mermaid
 sequenceDiagram
@@ -125,7 +328,7 @@ sequenceDiagram
     end
 ```
 
-### 3 · Memory Pressure Emergency
+### 3 - Harness: Memory Pressure Emergency
 
 ```mermaid
 sequenceDiagram
@@ -149,7 +352,37 @@ sequenceDiagram
     WD->>WD: notify "Emergency done. 22GB freed."
 ```
 
-### 4 · Session Recovery Flow
+### 4 - Compound: 30-Minute Knowledge Cycle
+
+```mermaid
+sequenceDiagram
+    participant WD as ai-watchdog daemon
+    participant FS as ~/.claude/projects/
+    participant LLM as Claude Opus API
+    participant SM as ~/billion-smart/
+    participant PI as PageIndex
+    participant WEB as Web Dashboard
+
+    Note over WD: Every 60 cycles (~30 min)
+
+    WD->>FS: scan recent .jsonl sessions
+    FS-->>WD: user messages grouped by project
+
+    WD->>LLM: summarize session (5-section format)
+    LLM-->>WD: structured summary
+
+    WD->>SM: write summaries/<timestamp>.md
+    WD->>SM: rebuild brain/user-focus.md + learnings.md
+
+    WD->>PI: reindex all .md files
+    PI-->>WD: N new, M total indexed
+
+    WD->>WEB: POST /api/refresh-summaries
+    WEB->>LLM: generate one-liner per session
+    LLM-->>WEB: cached to session-summaries.json
+```
+
+### 5 - Session Recovery Flow
 
 ```mermaid
 sequenceDiagram
@@ -175,34 +408,7 @@ sequenceDiagram
     WD-->>User: claude --resume 45a7ec54-...
 ```
 
-### 5 · TUI Live Dashboard Loop
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant TUI as tui.sh
-    participant STATE as logs/state.json
-
-    User->>TUI: ./tui.sh
-    TUI->>TUI: hide cursor, enter alt screen
-
-    loop every 3s
-        TUI->>STATE: read daemon stats
-        TUI->>TUI: vm_stat → memory bar
-        TUI->>TUI: ps aux → process counts
-        TUI-->>User: render full dashboard
-    end
-
-    alt key=q
-        TUI->>User: restore terminal, exit
-    else key=c
-        TUI->>TUI: cleanup_orphans()
-    else key=r
-        TUI->>User: show recovery menu
-    end
-```
-
-### 6 · launchd Auto-Start & Keep-Alive
+### 6 - launchd Auto-Start & Keep-Alive
 
 ```mermaid
 sequenceDiagram
@@ -213,7 +419,7 @@ sequenceDiagram
     Boot->>LD: user login
     LD->>WD: spawn watchdog.sh run (RunAtLoad=true)
 
-    Note over LD,WD: watchdog runs 7×24
+    Note over LD,WD: watchdog runs 7x24
 
     alt watchdog crashes
         LD->>WD: restart automatically (KeepAlive)
@@ -225,89 +431,45 @@ sequenceDiagram
 
 ---
 
-## Installation
+## Project Structure
 
-```bash
-git clone git@github.com:bianbiandashen/ai-watchdog.git ~/ai-watchdog
-cd ~/ai-watchdog
-./install.sh
 ```
-
-That's it. The watchdog starts immediately and survives reboots.
-
-### Web Dashboard (optional)
-
-```bash
-node web/server.js &
-open http://localhost:7474
+ai-watchdog/
+├── watchdog.sh          # Main daemon + CLI dispatcher
+├── config.sh            # All thresholds and patterns
+├── tui.sh               # Live ANSI terminal dashboard
+├── status.sh            # Quick one-shot status
+├── install.sh           # launchd LaunchAgent installer
+├── uninstall.sh         # Remove LaunchAgent
+├── .env                 # LLM API config (never committed)
+├── lib/
+│   ├── utils.sh         # Logging, notify, memory helpers, safe_kill
+│   ├── monitor.sh       # Orphan detection, memory pressure, snapshots
+│   ├── cleanup.sh       # Kill routines: orphans, hogs, emergency, logs
+│   ├── recovery.sh      # Session list parser and resume helper
+│   └── memory.sh        # Compound layer: LLM summaries, PageIndex, dashboard refresh
+├── web/
+│   ├── server.js        # Node.js API server (zero deps, port 7474)
+│   └── public/
+│       └── index.html   # Single-file SPA dashboard
+├── docs/                # Screenshots
+└── logs/                # watchdog.log, state.json, session-summaries.json (gitignored)
 ```
 
 ---
 
 ## Usage
 
-| Command | What it does |
-|---|---|
-| `./tui.sh` | Open live ANSI dashboard |
-| `node web/server.js` | Start web dashboard on port 7474 |
-| `./status.sh` | Quick one-shot status print |
-| `./watchdog.sh clean` | Manually run all cleanups now |
-| `./watchdog.sh recover` | Interactive session recovery menu |
-| `./watchdog.sh snapshot` | Save diagnostic snapshot |
-| `./uninstall.sh` | Stop daemon and remove LaunchAgent |
-
----
-
-## Configuration
-
-All thresholds live in `config.sh`:
-
-```bash
-CHECK_INTERVAL=30              # scan every 30 seconds
-SYSTEM_MEM_MIN_FREE_MB=2048    # warn + cleanup when free < 2 GB
-SYSTEM_MEM_CRITICAL_MB=512     # emergency kill when free < 512 MB
-PROCESS_MEM_MAX_MB=4096        # kill single proc exceeding 4 GB
-ORPHAN_THRESHOLD=2             # keep at most 2 instances per MCP server
-LOG_MAX_AGE_DAYS=3             # delete debug logs older than 3 days
-```
-
-### What gets killed vs. protected
-
-**Only these MCP patterns are eligible for killing** (`ORPHAN_TARGET_PATTERNS`):
-- `server-qdrant.js` — Qdrant Vector DB
-- `orba-context-mcp` / `orba-context@` — Orba Context MCP servers
-- `figma.*mcp`, `playwright.*mcp`, `ChromeDevTools.*mcp`, `mitmproxy.*mcp`, `proxyman.*mcp`
-- `plugin_miniprogram`, `mp-cli.*mcp`
-
-**These are NEVER touched** (`NEVER_KILL_PATTERNS`):
-- `claude`, `codex` — CLI tools (your active sessions)
-- `Cursor`, `OrbaDesktop`, `Warp` — GUI apps
-- Any process matching `claude.*--dangerously` — active Claude Code sessions
-
----
-
-## Project Structure
-
-```
-ai-watchdog/
-├── watchdog.sh          # Main daemon + CLI dispatcher
-├── tui.sh               # Live ANSI terminal dashboard
-├── status.sh            # Quick one-shot status
-├── install.sh           # launchd LaunchAgent installer
-├── uninstall.sh         # Remove LaunchAgent
-├── config.sh            # All thresholds and patterns
-├── lib/
-│   ├── utils.sh         # Logging, notify, memory helpers, safe_kill
-│   ├── monitor.sh       # Orphan detection, memory pressure, snapshots
-│   ├── cleanup.sh       # Kill routines: orphans, hogs, emergency, logs
-│   └── recovery.sh      # Session list parser and resume helper
-├── web/
-│   ├── server.js        # Node.js API server (zero deps, port 7474)
-│   └── public/
-│       └── index.html   # Single-file SPA dashboard
-├── docs/                # Screenshots
-└── logs/                # watchdog.log, state.json, snapshots/ (gitignored)
-```
+| Command | Layer | What it does |
+|---|---|---|
+| `./install.sh` | Harness | Install LaunchAgent (one-time) |
+| `./tui.sh` | Harness | Open live ANSI dashboard |
+| `node web/server.js` | Both | Start web dashboard on port 7474 |
+| `./status.sh` | Harness | Quick one-shot status print |
+| `./watchdog.sh clean` | Harness | Manually run all cleanups now |
+| `./watchdog.sh recover` | Harness | Interactive session recovery menu |
+| `./watchdog.sh snapshot` | Harness | Save diagnostic snapshot |
+| `./uninstall.sh` | Harness | Stop daemon and remove LaunchAgent |
 
 ---
 
@@ -315,24 +477,28 @@ ai-watchdog/
 
 - macOS 12+ (uses `launchctl`, `vm_stat`, `osascript`)
 - Bash 5+ (`brew install bash` if needed)
-- Python 3 (pre-installed on macOS, used for JSON parsing in recovery)
-- Node.js 18+ (optional, for web dashboard only)
+- Python 3 (pre-installed on macOS)
+- Node.js 18+ (optional, for web dashboard)
+- LLM API endpoint (optional, for Compound layer — any LiteLLM-compatible endpoint)
 
 ---
 
 ## FAQ
 
 **Will this kill my Claude / Codex session?**
-No. All CLI tools and GUI apps are in the `NEVER_KILL_PATTERNS` list. Only MCP server subprocesses (Qdrant, Playwright, Figma MCP, etc.) are eligible.
+No. All CLI tools and GUI apps are in `NEVER_KILL_PATTERNS`. Only MCP server subprocesses are eligible.
+
+**Can I use just the Harness layer without Compound?**
+Yes. Without `.env` configured, the Compound layer silently skips. You still get orphan reaping, memory guard, dashboard, and session recovery.
+
+**Does the Compound layer send my code to an API?**
+It sends only the **first line of each user message** (truncated to 200 chars) for summary generation. No code, no assistant responses, no file contents.
+
+**How do I query my accumulated knowledge?**
+Option A: Web dashboard Project Brains panel. Option B: Configure PageIndex as an MCP server in Claude Code for natural-language search.
 
 **Does this work on Linux?**
 Not yet — it uses macOS-specific APIs (`vm_stat`, `osascript`, `launchctl`). PRs welcome.
-
-**How do I change the scan interval?**
-Edit `CHECK_INTERVAL` in `config.sh`. Default is 30 seconds.
-
-**What's the "Clean to 60%" button?**
-It kills MCP processes biggest-first until system memory usage drops below 60%. The 80% red line on the gauge shows when you should start cleaning.
 
 ---
 
@@ -341,8 +507,9 @@ It kills MCP processes biggest-first until system memory usage drops below 60%. 
 1. Fork the repo
 2. Create a feature branch (`git checkout -b feat/my-feature`)
 3. Keep the zero-dependency constraint (no npm packages for the bash daemon)
-4. Test on macOS
-5. Submit a PR
+4. Harness changes: test on macOS, ensure `NEVER_KILL_PATTERNS` safety
+5. Compound changes: test with and without `.env` (graceful degradation)
+6. Submit a PR
 
 ---
 

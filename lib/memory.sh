@@ -163,15 +163,33 @@ generate_summary() {
         real_context=$(echo -e "$context")
 
         local summary
-        summary=$(call_llm "Summarize this AI coding session in project '$cwd'. Extract:
-1. **Questions Asked** — what the user wanted to know
-2. **Decisions Made** — what was chosen and why
-3. **Key Learnings** — patterns, gotchas, discoveries
-4. **Open Issues** — unresolved problems
+        summary=$(call_llm "You are running the COMPOUND STEP from compound-engineering methodology.
+Analyze this AI coding session in project '$cwd' and extract structured learnings.
+
+## Output these 5 sections:
+
+### What Worked
+- Approaches, tools, patterns that succeeded (reuse next time)
+
+### What Failed
+- Dead ends, wrong assumptions, wasted effort (avoid next time)
+
+### Key Decisions
+- What was chosen and WHY (preserve the reasoning for future context)
+
+### Learnings (HIGHEST VALUE)
+- Non-obvious discoveries, gotchas, performance insights
+- Things that would save 30+ minutes if known upfront
+- Format each as: **[topic]**: learning (so it's scannable)
+
+### Open Issues
+- Unresolved problems, TODOs, things to revisit
 
 --- SESSION ($count messages) ---
 $real_context
---- END ---")
+--- END ---
+
+Be concise. Focus on what's REUSABLE across future sessions, not what's ephemeral.")
 
         if [[ -n "$summary" && "$summary" != *"summarization failed"* ]]; then
             local ts
@@ -208,4 +226,32 @@ list_recent_summaries() {
 
 list_best_practices() {
     ls "${SMART_HOME}/best-practices/"*.md 2>/dev/null
+}
+
+# Re-index billion-smart into PageIndex after summaries are written
+run_pageindex_reindex() {
+    local venv_python="${SMART_HOME}/.venv/bin/python"
+    local reindex_script="${SMART_HOME}/reindex.py"
+    [[ ! -x "$venv_python" || ! -f "$reindex_script" ]] && {
+        log_debug "PAGEINDEX: venv or reindex.py not found, skipping"
+        return 0
+    }
+    log_info "PAGEINDEX: Re-indexing billion-smart into PageIndex..."
+    "$venv_python" "$reindex_script" 2>&1 | while read -r line; do
+        log_debug "PAGEINDEX: $line"
+    done
+    log_info "PAGEINDEX: Reindex complete"
+}
+
+# Trigger LLM-powered session summary refresh via web server API
+refresh_dashboard_summaries() {
+    # Web server must be running on port 7474
+    if ! curl -s --max-time 3 "http://127.0.0.1:7474/api/status" >/dev/null 2>&1; then
+        log_debug "SUMMARY: Web server not reachable, skipping"
+        return 0
+    fi
+    log_info "SUMMARY: Refreshing LLM session summaries..."
+    local result
+    result=$(curl -s --max-time 120 -X POST "http://127.0.0.1:7474/api/refresh-summaries" 2>/dev/null)
+    log_info "SUMMARY: $result"
 }

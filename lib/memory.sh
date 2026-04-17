@@ -6,26 +6,18 @@
 SMART_HOME="$HOME/billion-smart"
 ENV_FILE="${WATCHDOG_HOME}/.env"
 
-# Known repos → folder name mapping
-declare -A REPO_MAP=(
-    ["/Users/billion_bian/devin"]="devin"
-    ["/Users/billion_bian/orba-desktop"]="orba-desktop"
-    ["/Users/billion_bian/orba-memorybank-cli"]="orba-memorybank-cli"
-    ["/Users/billion_bian/orba"]="orba"
-    ["/Users/billion_bian/ai-watchdog"]="ai-watchdog"
-    ["/Users/billion_bian"]="_global"
-)
-
 # Resolve a working directory to a billion-smart folder
+# Compatible with bash 3.2 (macOS default) — no associative arrays
 resolve_project() {
     local cwd="$1"
-    for repo in "${!REPO_MAP[@]}"; do
-        if [[ "$cwd" == "$repo"* ]]; then
-            echo "${REPO_MAP[$repo]}"
-            return
-        fi
-    done
-    echo "_global"
+    case "$cwd" in
+        */devin|*/devin/*)                           echo "devin" ;;
+        */orba-desktop|*/orba-desktop/*)             echo "orba-desktop" ;;
+        */orba-memorybank-cli|*/orba-memorybank-cli/*) echo "orba-memorybank-cli" ;;
+        */orba|*/orba/*)                             echo "orba" ;;
+        */ai-watchdog|*/ai-watchdog/*)               echo "ai-watchdog" ;;
+        *)                                           echo "_global" ;;
+    esac
 }
 
 load_api_config() {

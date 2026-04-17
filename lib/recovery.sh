@@ -139,15 +139,17 @@ show_recovery_menu() {
     printf "${C_BOLD}${C_CYAN}=== Session Recovery ===${C_RESET}\n"
     echo ""
 
-    # Claude sessions
+    # Claude sessions — use indexed arrays for bash 3.2 compat
     printf "${C_BOLD}Claude Sessions (last 5):${C_RESET}\n"
     local i=0
-    declare -A session_map
+    local session_keys=""
+    local session_vals=""
     while IFS=$'\t' read -r ts sid cwd summary size; do
         i=$(( i + 1 ))
         local date_str; date_str=$(date -r "$ts" '+%m/%d %H:%M' 2>/dev/null || echo "unknown")
         printf "  ${C_GREEN}[c%d]${C_RESET} %-16s %-28s %s\n" "$i" "$date_str" "${cwd:0:28}" "${summary:0:45}"
-        session_map["c$i"]="claude:$sid"
+        session_keys="${session_keys}c${i} "
+        session_vals="${session_vals}claude:${sid} "
     done < <(list_claude_sessions 5)
     (( i == 0 )) && echo "  (no sessions found)"
 
@@ -158,7 +160,8 @@ show_recovery_menu() {
         j=$(( j + 1 ))
         local date_str; date_str=$(date -r "$ts" '+%m/%d %H:%M' 2>/dev/null || echo "unknown")
         printf "  ${C_YELLOW}[d%d]${C_RESET} %-16s %-28s %s\n" "$j" "$date_str" "${cwd:0:28}" "${summary:0:45}"
-        session_map["d$j"]="codex:$sid"
+        session_keys="${session_keys}d${j} "
+        session_vals="${session_vals}codex:${sid} "
     done < <(list_codex_sessions 5)
     (( j == 0 )) && echo "  (no sessions found)"
 
@@ -168,7 +171,16 @@ show_recovery_menu() {
 
     [[ "$choice" == "q" ]] && return 0
 
-    local entry="${session_map[$choice]}"
+    # Look up choice in parallel key/val lists
+    local idx=1 entry=""
+    for k in $session_keys; do
+        if [[ "$k" == "$choice" ]]; then
+            entry=$(echo "$session_vals" | cut -d' ' -f"$idx")
+            break
+        fi
+        idx=$(( idx + 1 ))
+    done
+
     if [[ -z "$entry" ]]; then
         echo "Invalid choice."
         return 1

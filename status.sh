@@ -54,8 +54,7 @@ echo "  Memory:  ${free_mb}MB free / ${total_mb}MB total (${used_pct}% used)"
 echo ""
 echo "  MCP Orphan Targets:"
 for pattern in "${ORPHAN_TARGET_PATTERNS[@]}"; do
-    count=$(ps aux | grep -cE "$pattern" 2>/dev/null || echo 0)
-    (( count > 1 )) && count=$(( count - 1 ))  # subtract grep itself
+    count=$(ps aux | grep -E "$pattern" 2>/dev/null | grep -cv grep)
     if (( count > 0 )); then
         flag=""
         (( count > ORPHAN_THRESHOLD )) && flag="  ⚠ SWARM"
@@ -67,8 +66,7 @@ done
 echo ""
 echo "  Monitored Tools (never killed):"
 for pattern in "${MONITOR_ONLY_PATTERNS[@]}"; do
-    count=$(ps aux | grep -cE "$pattern" 2>/dev/null || echo 0)
-    (( count > 1 )) && count=$(( count - 1 ))
+    count=$(ps aux | grep -E "$pattern" 2>/dev/null | grep -cv grep)
     (( count > 0 )) && printf "    %-42s %3d\n" "$pattern" "$count"
 done
 

@@ -31,27 +31,29 @@ load_api_config() {
     SUMMARY_MODEL="${SUMMARY_MODEL:-anthropic/claude-opus-4.6}"
 }
 
-call_llm() {
-    local prompt="$1"
-    local max_tokens="${2:-1024}"
+call_llm_raw() {
+    local system_prompt="$1"
+    local user_prompt="$2"
+    local max_tokens="${3:-2048}"
     [[ -z "$OPENAI_API_KEY" ]] && { log_warn "MEMORY: No API key"; return 1; }
 
     local payload
     payload=$(python3 -c "
 import json, sys
-prompt = sys.stdin.read()
+system_p = sys.argv[1]
+user_p = sys.stdin.read()
 print(json.dumps({
     'model': '$SUMMARY_MODEL',
     'max_tokens': $max_tokens,
     'messages': [
-        {'role': 'system', 'content': 'You are a concise technical summarizer. Output markdown. Focus on: what was asked, what was decided, key learnings. Keep under 500 words.'},
-        {'role': 'user', 'content': prompt}
+        {'role': 'system', 'content': system_p},
+        {'role': 'user', 'content': user_p}
     ]
 }))
-" <<< "$prompt")
+" "$system_prompt" <<< "$user_prompt")
 
     local response
-    response=$(curl -s --max-time 60 \
+    response=$(curl -s --max-time 90 \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer ${OPENAI_API_KEY}" \
         "${OPENAI_BASE_URL}/chat/completions" \
@@ -65,6 +67,12 @@ try:
 except Exception as e:
     print(f'(summarization failed: {e})')
 " 2>/dev/null
+}
+
+call_llm() {
+    local prompt="$1"
+    local max_tokens="${2:-1024}"
+    call_llm_raw "You are a concise technical summarizer. Output markdown. Focus on: what was asked, what was decided, key learnings. Keep under 500 words." "$prompt" "$max_tokens"
 }
 
 # Scan recent Claude sessions, group by project directory

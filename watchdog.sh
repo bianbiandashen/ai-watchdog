@@ -11,6 +11,7 @@ source "${SCRIPT_DIR}/lib/monitor.sh"
 source "${SCRIPT_DIR}/lib/cleanup.sh"
 source "${SCRIPT_DIR}/lib/recovery.sh"
 source "${SCRIPT_DIR}/lib/memory.sh"
+source "${SCRIPT_DIR}/lib/hermes.sh"
 
 mkdir -p "$LOG_DIR" "$SNAPSHOT_DIR"
 
@@ -98,6 +99,17 @@ main_loop() {
             refresh_dashboard_summaries 2>/dev/null || true
         fi
 
+        # 3b. Hermes agent cycle (every HERMES_CYCLE_INTERVAL cycles ≈ 10 min)
+        #     Realtime: inject / refresh_brains / alert
+        run_hermes_cycle 2>/dev/null || true
+
+        # 3c. Hermes nightly review (at midnight: archive + quality check + reindex)
+        local cur_hour; cur_hour=$(date +%H)
+        local cur_min; cur_min=$(date +%M)
+        if [[ "$cur_hour" == "00" ]] && (( CYCLES % 120 == 0 )); then
+            hermes_nightly_review 2>/dev/null || true
+        fi
+
         # 4. State file (for TUI)
         write_state
 
@@ -142,14 +154,39 @@ case "$cmd" in
         source "${SCRIPT_DIR}/lib/recovery.sh"
         show_recovery_menu
         ;;
+    hermes)
+        case "${2:-status}" in
+            status)  hermes_health_report | python3 -m json.tool 2>/dev/null || hermes_health_report ;;
+            skills)  hermes_discover_skills ;;
+            exec)    hermes_execute_skill "${3:-}" "${4:-'{}'}" ;;
+            notify)  hermes_notify_all "${3:-Test}" "${4:-Hello from Hermes}"; echo "Notification dispatched to ${#HERMES_NOTIFY_CHANNELS[@]} channels" ;;
+            memory)  hermes_memory_read "${3:-instant}" "${4:-}" ;;
+            inject)
+                if [[ -z "${3:-}" ]]; then
+                    echo "Available projects:"
+                    hermes_list_projects | sed 's/^/  /'
+                    echo ""
+                    echo "Usage: $0 hermes inject <project>"
+                else
+                    hermes_inject_brain "${3}"
+                fi
+                ;;
+            digest)  hermes_execute_skill "daily-digest" "${3:-'{"days":1}'}" | python3 -m json.tool 2>/dev/null ;;
+            agent)   HERMES_AGENT_ENABLED=true; hermes_agent_loop ;;
+            nightly) hermes_nightly_review ;;
+            tracker) hermes_execute_skill "skill-tracker" "${3:-'{"hours":24}'}" | python3 -m json.tool 2>/dev/null ;;
+            *)       echo "Usage: $0 hermes {status|skills|exec|inject|digest|agent|nightly|tracker|notify|memory}" ;;
+        esac
+        ;;
     *)
-        echo "Usage: $0 {run|once|clean|snapshot|recover}"
+        echo "Usage: $0 {run|once|clean|snapshot|recover|hermes}"
         echo ""
         echo "  run       Start 7x24 daemon"
         echo "  once      Single scan cycle"
         echo "  clean     Manual cleanup now"
         echo "  snapshot  Save diagnostic snapshot"
         echo "  recover   Interactive session recovery menu"
+        echo "  hermes    Hermes agent (status|skills|exec|inject|digest|notify|memory)"
         exit 1
         ;;
 esac

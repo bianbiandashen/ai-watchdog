@@ -20,6 +20,10 @@ notify() {
     log_info "NOTIFY: $title — $message"
     [[ "$NOTIFY_ENABLED" != "true" ]] && return
     osascript -e "display notification \"$message\" with title \"AI Watchdog\" subtitle \"$title\"" 2>/dev/null &
+    # Hermes multi-channel dispatch
+    if [[ "${#HERMES_NOTIFY_CHANNELS[@]}" -gt 0 ]] 2>/dev/null; then
+        hermes_notify_all "$title" "$message" &
+    fi
 }
 
 get_free_mem_mb() {

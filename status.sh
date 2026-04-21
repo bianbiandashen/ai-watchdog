@@ -70,6 +70,29 @@ for pattern in "${MONITOR_ONLY_PATTERNS[@]}"; do
     (( count > 0 )) && printf "    %-42s %3d\n" "$pattern" "$count"
 done
 
+# Hermes Agent
+echo ""
+echo "  Hermes Agent:"
+HERMES_HEALTH="${LOG_DIR}/hermes-health.json"
+if [[ -f "$HERMES_HEALTH" ]]; then
+    python3 - <<PYEOF2
+import json
+try:
+    d = json.load(open('$HERMES_HEALTH'))
+    print(f"    Enabled:    {d.get('enabled', False)}")
+    print(f"    Skills:     {d.get('skill_count', 0)} available")
+    print(f"    Channels:   {d.get('channel_count', 0)} configured")
+    print(f"    MoA:        {'on' if d.get('moa_enabled') else 'off'}")
+    t = d.get('memory_tiers', {})
+    print(f"    Memory:     instant={t.get('instant',0)} session={t.get('session',0)} overflow={t.get('overflow',0)}")
+    print(f"    Last cycle: {d.get('last_cycle', 'never')}")
+except Exception as e:
+    print(f"    (error reading hermes health: {e})")
+PYEOF2
+else
+    echo "    (no data — run: ./watchdog.sh hermes status)"
+fi
+
 echo ""
 echo "  Logs: ${LOG_DIR}/"
 echo "  TUI:  ./tui.sh"

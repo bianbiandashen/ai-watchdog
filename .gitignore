@@ -6,3 +6,4 @@ node_modules/
 com.ai-watchdog.agent.plist
 com.ai-watchdog.web.plist
 .env
+memory/

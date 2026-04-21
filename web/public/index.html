@@ -215,6 +215,43 @@ tr:hover td { background: rgba(88,166,255,.04); }
     <div id="summaries-list" class="card" style="font-size:12px;color:var(--dim)">Loading...</div>
   </div>
 
+  <!-- Hermes Agent -->
+  <div class="section" id="hermes-section">
+    <div class="section-title">Hermes Agent <span style="font-weight:400;color:var(--dim)">(知识沉淀 · 每日体检 · Brain 注入 · 价值趋势)</span></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="card" style="padding:14px">
+        <div style="font-family:var(--font-mono);font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:8px">
+          Agent Status
+          <button class="btn btn-copy" onclick="runDigest()" style="float:right;font-size:10px">Run Daily Digest</button>
+        </div>
+        <div id="hermes-status" style="font-family:var(--font-mono);font-size:12px">Loading...</div>
+      </div>
+      <div class="card" style="padding:14px">
+        <div style="font-family:var(--font-mono);font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:8px">Brain Inject <span style="font-weight:400;text-transform:none">(选项目 → 自动写入 CLAUDE.md)</span></div>
+        <div id="hermes-inject" style="font-size:12px">Loading...</div>
+      </div>
+      <div class="card" style="padding:14px">
+        <div style="font-family:var(--font-mono);font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:8px">Skills</div>
+        <div id="hermes-skills" style="font-size:12px">Loading...</div>
+      </div>
+      <div class="card" style="padding:14px">
+        <div style="font-family:var(--font-mono);font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:8px">Memory Tiers</div>
+        <div id="hermes-memory" style="font-size:12px">Loading...</div>
+      </div>
+    </div>
+    <div class="card" style="padding:14px;margin-top:12px">
+      <div style="font-family:var(--font-mono);font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:8px">
+        Agent Decisions <span style="font-weight:400;text-transform:none">(LLM decides: inject? refresh? archive? noop?)</span>
+        <button class="btn btn-copy" onclick="runAgentCycle()" style="float:right;font-size:10px">Run Agent Now</button>
+      </div>
+      <div id="hermes-decisions" style="font-family:var(--font-mono);font-size:12px;color:var(--dim)">Loading...</div>
+    </div>
+    <div class="card" id="hermes-digest-result" style="padding:14px;margin-top:12px;display:none">
+      <div style="font-family:var(--font-mono);font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:8px">Daily Digest Result</div>
+      <div id="hermes-digest-content" style="font-size:12px"></div>
+    </div>
+  </div>
+
   <!-- Logs -->
   <div class="section">
     <div class="section-title">Watchdog Log</div>
@@ -637,15 +674,151 @@ function copyText(btn) {
   );
 }
 
+// ─── Hermes Rendering ────────────────────────────────────────────────────────
+function renderHermes(d) {
+  if (!d) return;
+  const st = $('hermes-status');
+  st.innerHTML = `
+    <div>Enabled: <span class="val">${d.enabled !== false ? '<span style="color:var(--green)">yes</span>' : 'no'}</span></div>
+    <div>Skills: <span class="val">${d.skillCount || 0}</span></div>
+    <div>Channels: <span class="val">${(d.channels||[]).length}</span></div>
+    <div>MoA: <span class="val">${d.moa_enabled ? 'on' : 'off'}</span></div>
+    <div>MCP procs: <span class="val">${d.mcp_process_count || '—'}</span></div>
+    <div>Last: <span class="val" style="color:var(--dim)">${d.last_cycle || 'never'}</span></div>`;
+
+  // Inject panel — show available projects with inject buttons
+  const inj = $('hermes-inject');
+  // Get project list from the hermes memory or brains API
+  api('/api/knowledge').then(k => {
+    const brains = (k && k.brains) || [];
+    const projects = [...new Set(brains.map(b => b.project))].filter(Boolean);
+    if (!projects.length) {
+      inj.innerHTML = '<span style="color:var(--dim)">No brain data yet — run Refresh Brains first</span>';
+    } else {
+      inj.innerHTML = projects.map(p =>
+        `<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--bg3)">` +
+        `<span style="font-weight:600">${esc(p)}</span>` +
+        `<button class="btn btn-copy" onclick="injectBrain('${esc(p)}')" style="font-size:10px">Inject CLAUDE.md</button></div>`
+      ).join('');
+    }
+  });
+
+  const mt = $('hermes-memory');
+  const tiers = d.memoryTiers || {};
+  mt.innerHTML = ['instant', 'session', 'overflow'].map(t => {
+    const ti = tiers[t] || { files: 0, bytes: 0 };
+    const size = ti.bytes >= 1048576 ? (ti.bytes/1048576).toFixed(1)+'MB' : ti.bytes >= 1024 ? (ti.bytes/1024).toFixed(0)+'KB' : ti.bytes+'B';
+    return `<div style="display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:11px;margin-bottom:4px">` +
+      `<span style="color:var(--blue);width:60px">${t}</span> ${ti.files} entries, ${size}</div>`;
+  }).join('');
+}
+
+function renderHermesSkills(skills) {
+  const el = $('hermes-skills');
+  if (!skills || !skills.length) { el.innerHTML = '<span style="color:var(--dim)">(no skills)</span>'; return; }
+  el.innerHTML = skills.map(s =>
+    `<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--bg3)">` +
+    `<div><span style="font-weight:600">${esc(s.name)}</span>` +
+    (s.description ? ` <span style="color:var(--dim);font-size:11px">${esc(s.description)}</span>` : '') +
+    `</div><button class="btn btn-copy" onclick="executeSkill('${esc(s.name)}')">Run</button></div>`
+  ).join('');
+}
+
+function renderAgentDecisions(d) {
+  const el = $('hermes-decisions');
+  if (!d) { el.innerHTML = 'Agent not active'; return; }
+  let html = '';
+  if (d.latest && Array.isArray(d.latest) && d.latest.length > 0) {
+    html += d.latest.map(a => {
+      const color = a.action === 'noop' ? 'var(--green)' : a.action === 'alert' ? '#ef4444' : 'var(--blue)';
+      return `<div style="padding:3px 0;border-bottom:1px solid var(--bg3)">` +
+        `<span style="color:${color};font-weight:600">${esc(a.action)}${a.project ? ':'+esc(a.project) : ''}</span> ` +
+        `<span style="color:var(--dim)">${esc(a.reason||'')}</span></div>`;
+    }).join('');
+  }
+  if (d.history && d.history.length > 0) {
+    html += '<div style="margin-top:8px;max-height:150px;overflow-y:auto;font-size:10px">';
+    html += d.history.slice(0, 15).map(h => {
+      if (h.type === 'PARSE_FAIL') return `<div style="color:#ef4444">[${esc(h.ts||'')}] parse error</div>`;
+      const acts = (h.actions||[]).map(a => a.action + (a.project ? ':'+a.project : '')).join(', ');
+      return `<div style="color:var(--dim)">[${esc(h.ts||'')}] ${esc(acts)}</div>`;
+    }).join('');
+    html += '</div>';
+  }
+  if (!html) html = 'No agent decisions yet. Runs every ~10min or click "Run Agent Now".';
+  el.innerHTML = html;
+}
+
+async function runAgentCycle() {
+  toast('Running agent cycle (LLM call)...');
+  try {
+    const r = await fetch('/api/hermes/agent-cycle', {method:'POST'}).then(r=>r.json());
+    if (r && r.ok) { toast('Agent cycle complete'); refreshAll(); }
+    else toast(r ? (r.error||'Failed') : 'Failed', false);
+  } catch(e) { toast(e.message, false); }
+}
+
+async function injectBrain(project) {
+  toast('Injecting brain for ' + project + '...');
+  try {
+    const r = await fetch('/api/hermes/inject', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({project}) }).then(r=>r.json());
+    if (r && r.ok) toast(r.message || 'Brain injected!');
+    else toast(r ? r.error : 'Inject failed', false);
+  } catch(e) { toast(e.message, false); }
+}
+
+async function runDigest() {
+  toast('Running daily digest...');
+  const panel = $('hermes-digest-result');
+  const content = $('hermes-digest-content');
+  panel.style.display = '';
+  content.innerHTML = '<span style="color:var(--dim)">Computing...</span>';
+  try {
+    const r = await fetch('/api/hermes/digest', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({days:7}) }).then(r=>r.json());
+    if (r && r.projects) {
+      let html = `<div style="margin-bottom:8px"><strong>Avg Score: ${r.average_score}/100</strong> across ${r.total_projects} projects (${r.days_scanned}d window)</div>`;
+      html += r.projects.map(p => {
+        const bar = '<span style="display:inline-block;width:' + p.score + 'px;height:8px;background:' +
+          (p.score >= 60 ? 'var(--green)' : p.score >= 30 ? '#eab308' : 'var(--dim)') + ';border-radius:4px;margin-right:6px"></span>';
+        return `<div style="padding:4px 0;border-bottom:1px solid var(--bg3)">${bar}<strong>${esc(p.project)}</strong> <span style="color:var(--dim)">${p.score}/100</span> — ${esc(p.reasons.join(', '))}` +
+          (p.brain_empty > 0 ? ` <span style="color:#ef4444">(${p.brain_empty} empty brain files)</span>` : '') + '</div>';
+      }).join('');
+      if (r.actions && r.actions.length) {
+        html += '<div style="margin-top:8px;font-size:11px;color:var(--dim)"><strong>Actions:</strong><br>' + r.actions.map(a => '• ' + esc(a)).join('<br>') + '</div>';
+      }
+      content.innerHTML = html;
+      toast('Digest complete');
+    } else {
+      content.innerHTML = '<pre style="font-size:11px">' + JSON.stringify(r, null, 2) + '</pre>';
+    }
+  } catch(e) { content.innerHTML = '<span style="color:#ef4444">' + e.message + '</span>'; toast('Digest failed', false); }
+}
+
+async function executeSkill(name) {
+  toast('Running ' + name + '...');
+  try {
+    const r = await fetch('/api/hermes/execute', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name,args:{}}) }).then(r=>r.json());
+    if (r && r.ok) {
+      toast('Skill "' + name + '" completed');
+      alert('Result:\\n\\n' + JSON.stringify(r.result, null, 2));
+    } else toast(r ? r.error : 'Failed', false);
+  } catch(e) { toast(e.message, false); }
+}
+
 async function refreshAll() {
-  const [status, procs, sessions, logs, knowledge] = await Promise.all([
-    api('/api/status'), api('/api/processes'), api('/api/sessions'), api('/api/logs'), api('/api/knowledge')
+  const [status, procs, sessions, logs, knowledge, hermesStatus, hermesSkills, decisions] = await Promise.all([
+    api('/api/status'), api('/api/processes'), api('/api/sessions'), api('/api/logs'),
+    api('/api/knowledge'), api('/api/hermes/status'), api('/api/hermes/skills'),
+    api('/api/hermes/decisions')
   ]);
   renderStatus(status);
   renderProcesses(procs);
   renderSessions(sessions);
   renderLogs(logs);
   renderKnowledge(knowledge);
+  renderHermes(hermesStatus);
+  renderHermesSkills(hermesSkills);
+  renderAgentDecisions(decisions);
 }
 
 function startAutoRefresh() {

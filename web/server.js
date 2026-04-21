@@ -706,6 +706,79 @@ const ROUTES = {
     summaries: getRecentSummaries(10),
     brains: getBrains()
   }),
+  'GET /api/hermes/status': () => {
+    const healthFile = path.join(ROOT, 'logs', 'hermes-health.json');
+    const health = readJSON(healthFile) || { enabled: false };
+    const skillsDir = path.join(ROOT, 'skills');
+    let skillCount = 0;
+    try { skillCount = fs.readdirSync(skillsDir, { withFileTypes: true }).filter(d => d.isDirectory() && fs.existsSync(path.join(skillsDir, d.name, 'SKILL.md'))).length; } catch {}
+    const memDir = path.join(ROOT, 'memory');
+    const tierSizes = {};
+    for (const tier of ['instant', 'session', 'overflow']) {
+      const td = path.join(memDir, tier);
+      try {
+        const files = fs.readdirSync(td);
+        tierSizes[tier] = { files: files.length, bytes: files.reduce((s, f) => { try { return s + fs.statSync(path.join(td, f)).size; } catch { return s; } }, 0) };
+      } catch { tierSizes[tier] = { files: 0, bytes: 0 }; }
+    }
+    // Check configured notification channels from .env
+    let channels = [];
+    try {
+      const envContent = fs.readFileSync(path.join(ROOT, '.env'), 'utf8');
+      const channelMap = { TELEGRAM_BOT_TOKEN: 'Telegram', DISCORD_WEBHOOK_URL: 'Discord', SLACK_WEBHOOK_URL: 'Slack', DINGTALK_WEBHOOK_URL: 'DingTalk', FEISHU_WEBHOOK_URL: 'Feishu', GENERIC_WEBHOOK_URL: 'Generic' };
+      for (const [key, name] of Object.entries(channelMap)) {
+        const m = envContent.match(new RegExp(`^${key}=(.+)`, 'm'));
+        if (m && m[1].trim()) channels.push({ name, active: true });
+      }
+    } catch {}
+    return { ...health, skillCount, memoryTiers: tierSizes, channels };
+  },
+  'GET /api/hermes/skills': () => {
+    const skillsDir = path.join(ROOT, 'skills');
+    try {
+      return fs.readdirSync(skillsDir, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => {
+        const mfPath = path.join(skillsDir, d.name, 'SKILL.md');
+        let meta = { name: d.name };
+        try {
+          for (const line of fs.readFileSync(mfPath, 'utf8').split('\n')) {
+            const idx = line.indexOf(':');
+            if (idx > 0) meta[line.slice(0, idx).trim().toLowerCase()] = line.slice(idx + 1).trim();
+          }
+        } catch {}
+        return meta;
+      });
+    } catch { return []; }
+  },
+  'GET /api/hermes/decisions': () => {
+    const logFile = path.join(ROOT, 'memory', 'session', 'agent-decisions.log');
+    const instantFile = path.join(ROOT, 'memory', 'instant', 'last-agent-decisions');
+    let history = [];
+    try {
+      for (const line of fs.readFileSync(logFile, 'utf8').split('\n').filter(Boolean).slice(-50)) {
+        const m = line.match(/^\[(.+?)\]\s+(DECISIONS|PARSE_FAIL):\s+(.+)$/);
+        if (!m) { history.push({ raw: line }); continue; }
+        let actions = [];
+        if (m[2] === 'DECISIONS') { try { actions = JSON.parse(m[3]); } catch {} }
+        history.push({ ts: m[1], type: m[2], actions, raw: m[2] === 'PARSE_FAIL' ? m[3] : undefined });
+      }
+    } catch {}
+    let latest = null;
+    try { latest = JSON.parse(fs.readFileSync(instantFile, 'utf8')); } catch {}
+    return { latest, history: history.reverse() };
+  },
+  'GET /api/hermes/memory': () => {
+    const memDir = path.join(ROOT, 'memory');
+    const result = {};
+    for (const tier of ['instant', 'session', 'overflow']) {
+      const td = path.join(memDir, tier);
+      const entries = {};
+      try {
+        for (const f of fs.readdirSync(td)) { entries[f] = fs.readFileSync(path.join(td, f), 'utf8').substring(0, 2000); }
+      } catch {}
+      result[tier] = { entries };
+    }
+    return result;
+  },
 };
 
 const server = http.createServer((req, res) => {
@@ -790,6 +863,110 @@ const server = http.createServer((req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.writeHead(200);
     res.end(JSON.stringify(r));
+    return;
+  }
+
+  // POST /api/hermes/execute — Execute a skill
+  if (method === 'POST' && pathname === '/api/hermes/execute') {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', () => {
+      try {
+        const { name, args } = JSON.parse(body);
+        const skillPath = path.join(ROOT, 'skills', name, 'skill.sh');
+        if (!fs.existsSync(skillPath)) { res.writeHead(404); res.end(JSON.stringify({ ok: false, error: 'Skill not found' })); return; }
+        const argsJson = JSON.stringify(args || {});
+        const result = execSync(`echo '${argsJson.replace(/'/g, "'\\''")}' | bash "${skillPath}"`, {
+          encoding: 'utf8', timeout: 30000, env: { ...process.env, WATCHDOG_HOME: ROOT }
+        });
+        res.setHeader('Content-Type', 'application/json');
+        res.writeHead(200);
+        try { res.end(JSON.stringify({ ok: true, result: JSON.parse(result) })); }
+        catch { res.end(JSON.stringify({ ok: true, result: result.trim() })); }
+      } catch (e) {
+        res.setHeader('Content-Type', 'application/json');
+        res.writeHead(500);
+        res.end(JSON.stringify({ ok: false, error: e.message }));
+      }
+    });
+    return;
+  }
+
+  // POST /api/hermes/notify — Send notification
+  if (method === 'POST' && pathname === '/api/hermes/notify') {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', () => {
+      try {
+        const { title, message } = JSON.parse(body);
+        exec(`bash -c 'source "${ROOT}/config.sh" && source "${ROOT}/lib/utils.sh" && source "${ROOT}/lib/hermes.sh" && hermes_notify_all "${(title || 'Test').replace(/"/g, '\\"')}" "${(message || '').replace(/"/g, '\\"')}"'`,
+          { timeout: 10000 }, (err) => {
+            res.setHeader('Content-Type', 'application/json');
+            res.writeHead(200);
+            res.end(JSON.stringify({ ok: !err, error: err ? err.message : null }));
+          });
+      } catch (e) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
+  // POST /api/hermes/agent-cycle — manually trigger one agent loop
+  if (method === 'POST' && pathname === '/api/hermes/agent-cycle') {
+    exec(`bash -c 'source "${ROOT}/config.sh" && source "${ROOT}/lib/utils.sh" && source "${ROOT}/lib/memory.sh" && source "${ROOT}/lib/hermes.sh" && HERMES_AGENT_ENABLED=true hermes_agent_loop'`,
+      { timeout: 120000, env: { ...process.env, WATCHDOG_HOME: ROOT, HOME: process.env.HOME } }, (err, stdout, stderr) => {
+        res.setHeader('Content-Type', 'application/json');
+        res.writeHead(err ? 500 : 200);
+        res.end(JSON.stringify({ ok: !err, output: (stdout || '').trim(), error: err ? ((stderr || '') + ' ' + (err.message || '')).trim() : null }));
+      });
+    return;
+  }
+
+  // POST /api/hermes/inject — Inject brain into project CLAUDE.md
+  if (method === 'POST' && pathname === '/api/hermes/inject') {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', () => {
+      try {
+        const { project } = JSON.parse(body);
+        if (!project) { res.writeHead(400); res.end(JSON.stringify({ error: 'project required' })); return; }
+        const result = execSync(`bash -c 'source "${ROOT}/config.sh" && source "${ROOT}/lib/utils.sh" && source "${ROOT}/lib/memory.sh" && source "${ROOT}/lib/hermes.sh" && hermes_inject_brain "${project}"'`, {
+          encoding: 'utf8', timeout: 10000, env: { ...process.env, WATCHDOG_HOME: ROOT, HOME: process.env.HOME }
+        });
+        res.setHeader('Content-Type', 'application/json');
+        res.writeHead(200);
+        res.end(JSON.stringify({ ok: true, message: result.trim() }));
+      } catch (e) {
+        res.setHeader('Content-Type', 'application/json');
+        res.writeHead(500);
+        res.end(JSON.stringify({ ok: false, error: e.stderr ? e.stderr.toString().trim() : e.message }));
+      }
+    });
+    return;
+  }
+
+  // POST /api/hermes/digest — Run daily digest
+  if (method === 'POST' && pathname === '/api/hermes/digest') {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', () => {
+      try {
+        const { days } = JSON.parse(body || '{}');
+        const argsJson = JSON.stringify({ days: days || 1 });
+        const skillPath = path.join(ROOT, 'skills', 'daily-digest', 'skill.sh');
+        const result = execSync(`echo '${argsJson}' | bash "${skillPath}"`, {
+          encoding: 'utf8', timeout: 30000, env: { ...process.env, WATCHDOG_HOME: ROOT }
+        });
+        res.setHeader('Content-Type', 'application/json');
+        res.writeHead(200);
+        res.end(result);
+      } catch (e) {
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
     return;
   }
 

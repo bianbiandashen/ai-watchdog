@@ -81,3 +81,17 @@ RECOVERY_WINDOW_SEC=300
 # ─── Notifications ───────────────────────────────────────────────────────────
 NOTIFY_ENABLED=true
 VERBOSE=false    # set to true to see DEBUG lines in watchdog.log
+
+# ─── Hermes Agent ────────────────────────────────────────────────────────────
+HERMES_ENABLED=true
+HERMES_AGENT_ENABLED=true      # LLM-based agent decisions (requires API key in .env)
+HERMES_CYCLE_INTERVAL=20       # every N daemon cycles (~10min at 30s interval)
+HERMES_SKILLS_DIR="${WATCHDOG_HOME}/skills"
+HERMES_MEMORY_DIR="${WATCHDOG_HOME}/memory"
+HERMES_NOTIFY_CHANNELS=()      # populated at runtime from .env webhook URLs
+HERMES_MOA_ENABLED=false        # Mixture-of-Agents parallel analysis
+HERMES_MOA_MIN_SUCCESS=1        # minimum successful LLM responses for MoA aggregation
+HERMES_HEALTH_REPORT_FILE="${LOG_DIR}/hermes-health.json"
+HERMES_AGENT_DECISION_LOG="${HERMES_MEMORY_DIR}/session/agent-decisions.log"
+HERMES_AGENT_MAX_ACTIONS=5     # safety cap on actions per cycle
+HERMES_LAST_CYCLE=0
